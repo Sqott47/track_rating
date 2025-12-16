@@ -23,14 +23,21 @@ from sqlalchemy import func, text
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
+UPLOAD_DIR = os.getenv(
+    "UPLOAD_DIR",
+    os.path.join(BASE_DIR, "static", "uploads"),
+)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change_this_secret_key")
-app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL") or "sqlite:///" + os.path.join(
-    BASE_DIR, "track_ratings.db"
+DB_PATH = os.getenv(
+    "DB_PATH",
+    os.path.join(BASE_DIR, "track_ratings.db"),
 )
+
+app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
