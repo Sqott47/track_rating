@@ -78,7 +78,7 @@ jobs:
 
             # Restart service
             sudo systemctl restart track_rating.service
-            sudo systemctl status track_rating.service --no-pager -l
+            sudo systemctl status track_rating.service
 
 
             # Cleanup old releases (keep last 10)
