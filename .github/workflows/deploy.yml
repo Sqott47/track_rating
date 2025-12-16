@@ -15,7 +15,6 @@ jobs:
       - name: Build release archive
         run: |
           tar \
-            --exclude='./release.tgz' \
             --exclude='.git' \
             --exclude='__pycache__' \
             --exclude='*.pyc' \
@@ -27,10 +26,7 @@ jobs:
             --exclude='static/uploads' \
             --exclude='app.sock' \
             --exclude='*.zip' \
-            -czf /tmp/release.tgz .
-
-          mv /tmp/release.tgz ./release.tgz
-      
+            -czf release.tgz .
 
       - name: Upload archive to server
         uses: appleboy/scp-action@v0.1.7
@@ -78,8 +74,7 @@ jobs:
 
             # Restart service
             sudo systemctl restart track_rating.service
-            sudo systemctl status track_rating.service
-
+            sudo systemctl status track_rating.service --no-pager -l
 
             # Cleanup old releases (keep last 10)
             cd "$BASE/releases"
