@@ -63,18 +63,6 @@
                 </div>
             </div>
 
-            {% if audio_url %}
-                <div class="track-audio-block">
-                    <div class="track-audio-label">Прослушивание</div>
-                    {# Кастомный плеер в стиле панели оценки (без SocketIO-синхронизации) #}
-                    {% set audio_src = audio_url %}
-                    {% set player_id = "track-player-" ~ (track.id if track is defined else "single") %}
-                    {% set player_title = player_title %}
-                    {% set player_subtitle = player_subtitle %}
-                    {% include "partials/yplayer_embed.html" %}
-                </div>
-            {% endif %}
-
             <div class="track-summary-grid">
                 <div class="track-summary-main">
                     <div class="track-overall-block">
@@ -101,14 +89,14 @@
                                 {% if criteria_stats %}
                                     {% for c in criteria_stats %}
                                         <tr>
-                                            <td data-label="Параметр">
+                                            <td>
                                                 {% for key, label in CRITERIA %}
                                                     {% if key == c.key %}
                                                         {{ label }}
                                                     {% endif %}
                                                 {% endfor %}
                                             </td>
-                                            <td class="track-score-cell" data-label="Средний балл">
+                                            <td class="track-score-cell">
                                                 {% if c.avg is not none %}
                                                     <span class="score-chip">{{ '%.2f'|format(c.avg) }}</span>
                                                 {% else %}
@@ -139,14 +127,14 @@
                                 {% if viewer_criteria_stats %}
                                     {% for c in viewer_criteria_stats %}
                                         <tr>
-                                            <td data-label="Параметр">
+                                            <td>
                                                 {% for key, label in CRITERIA %}
                                                     {% if key == c.key %}
                                                         {{ label }}
                                                     {% endif %}
                                                 {% endfor %}
                                             </td>
-                                            <td class="track-score-cell" data-label="Средний балл">
+                                            <td class="track-score-cell">
                                                 {% if c.avg is not none %}
                                                     <span class="score-chip">{{ '%.2f'|format(c.avg) }}</span>
                                                 {% else %}
@@ -189,8 +177,8 @@
                                 {% if raters_stats %}
                                     {% for r in raters_stats %}
                                         <tr>
-                                            <td data-label="Оценщик">{{ r.name }}</td>
-                                            <td class="track-score-cell" data-label="Средний балл">
+                                            <td>{{ r.name }}</td>
+                                            <td class="track-score-cell">
                                                 {% if r.avg is not none %}
                                                     <span class="score-chip">{{ '%.2f'|format(r.avg) }}</span>
                                                 {% else %}

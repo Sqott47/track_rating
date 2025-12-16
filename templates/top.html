@@ -54,8 +54,8 @@
                 <tbody id="top-table-body">
                 {% for t in tracks %}
                     <tr class="top-row" data-track-id="{{ t.id }}">
-                        <td class="top-pos" data-label="#">{{ t.position }}</td>
-                        <td class="top-name-cell" data-label="Трек">
+                        <td class="top-pos">{{ t.position }}</td>
+                        <td class="top-name-cell">
                             <span class="top-name-text">{{ t.name }}</span>
                             {% if is_admin %}
                             <span class="top-row-actions">
@@ -76,7 +76,7 @@
                             </span>
                             {% endif %}
                         </td>
-                        <td data-label="Средний балл">
+                        <td>
                             <span class="top-score-chip score-chip">
                                 {% if t.avg_streamers is not none %}
                                     {{ "%.2f"|format(t.avg_streamers) }}
@@ -85,7 +85,7 @@
                                 {% endif %}
                             </span>
                         </td>
-                        <td data-label="Средний балл зрителей">
+                        <td>
                             <span class="top-score-chip top-score-chip-viewer score-chip">
                                 {% if t.avg_viewers is not none %}
                                     {{ "%.2f"|format(t.avg_viewers) }}

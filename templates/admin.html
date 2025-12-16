@@ -74,8 +74,8 @@
                             {% set comment = row[0] %}
                             {% set track = row[1] %}
                             <tr>
-                                <td data-label="ID">#{{ comment.id }}</td>
-                                <td data-label="Трек">
+                                <td>#{{ comment.id }}</td>
+                                <td>
                                     {% if track %}
                                         <a href="{{ url_for('track_page', track_id=track.id) }}" target="_blank">
                                             {{ track.name }}
@@ -84,21 +84,21 @@
                                         <em>Удалённый трек</em>
                                     {% endif %}
                                 </td>
-                                <td data-label="Автор">{{ comment.author_name or 'Аноним' }}</td>
-                                <td data-label="Текст" style="max-width: 260px; white-space: normal;">
+                                <td>{{ comment.author_name or 'Аноним' }}</td>
+                                <td style="max-width: 260px; white-space: normal;">
                                     {{ comment.text }}
                                 </td>
-                                <td data-label="Дата">
+                                <td>
                                     {{ comment.created_at.strftime('%d.%m.%Y %H:%M') if comment.created_at else '' }}
                                 </td>
-                                <td data-label="Статус">
+                                <td>
                                     {% if comment.is_deleted %}
                                         <span class="news-tag">Скрыт</span>
                                     {% else %}
                                         <span class="news-tag">Опубликован</span>
                                     {% endif %}
                                 </td>
-                                <td data-label="Действия">
+                                <td>
                                     <form method="post" style="display:inline-block;">
                                         <input type="hidden" name="form" value="comments">
                                         <input type="hidden" name="comment_id" value="{{ comment.id }}">

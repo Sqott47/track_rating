@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <title>{% block title %}Оценка треков{% endblock %}</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
     {% block head_extra %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}">
+<body>
 <div class="page-bg"></div>
 <div id="bg-rain-layer"></div>
 
@@ -26,7 +26,6 @@
                     <a href="{{ url_for('home') }}" class="nav-link">Главная</a>
                     <a href="{{ url_for('top_tracks') }}" class="nav-link">Топ треков</a>
                     <a href="{{ url_for('viewers_page') }}" class="nav-link">Оценить трек</a>
-                    <a href="{{ url_for('queue_page') }}" class="nav-link">Очередь</a>
                     {% set user_role = session.get('role') %}
                     {% if user_role in ['admin', 'superadmin', 'judge'] %}
                         <a href="{{ url_for('index') }}" class="nav-link">Панель оценки</a>
@@ -80,7 +79,6 @@
 {% block scripts %}
 <script src="https://cdn.socket.io/3.1.3/socket.io.min.js" crossorigin="anonymous"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-<script src="{{ url_for('static', filename='js/yplayer_embed.js') }}"></script>
 {% endblock %}
 
 <style>

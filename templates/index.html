@@ -1,74 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Оценка треков · Панель
-<script>
-(function () {
-  var openBtn = document.getElementById('btn-open-clear-queue');
-  var backdrop = document.getElementById('clear-queue-modal-backdrop');
-  var closeBtn = document.getElementById('clear-queue-close-btn');
-  var cancelBtn = document.getElementById('clear-queue-cancel-btn');
-
-  if (!openBtn || !backdrop) return;
-
-  function openModal() {
-    backdrop.classList.add('is-open');
-    backdrop.setAttribute('aria-hidden', 'false');
-  }
-  function closeModal() {
-    backdrop.classList.remove('is-open');
-    backdrop.setAttribute('aria-hidden', 'true');
-  }
-
-  openBtn.addEventListener('click', openModal);
-  if (closeBtn) closeBtn.addEventListener('click', closeModal);
-  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-
-  backdrop.addEventListener('click', function (e) {
-    if (e.target === backdrop) closeModal();
-  });
-
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
-  });
-})();
-</script>
-
-{% endblock %}
-
-{% block body_class %}has-docked-player
-<script>
-(function () {
-  var openBtn = document.getElementById('btn-open-clear-queue');
-  var backdrop = document.getElementById('clear-queue-modal-backdrop');
-  var closeBtn = document.getElementById('clear-queue-close-btn');
-  var cancelBtn = document.getElementById('clear-queue-cancel-btn');
-
-  if (!openBtn || !backdrop) return;
-
-  function openModal() {
-    backdrop.classList.add('is-open');
-    backdrop.setAttribute('aria-hidden', 'false');
-  }
-  function closeModal() {
-    backdrop.classList.remove('is-open');
-    backdrop.setAttribute('aria-hidden', 'true');
-  }
-
-  openBtn.addEventListener('click', openModal);
-  if (closeBtn) closeBtn.addEventListener('click', closeModal);
-  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-
-  backdrop.addEventListener('click', function (e) {
-    if (e.target === backdrop) closeModal();
-  });
-
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
-  });
-})();
-</script>
-
-{% endblock %}
+{% block title %}Оценка треков · Панель{% endblock %}
 
 {% block content %}
 <div class="page-content">
@@ -81,7 +13,9 @@
             </div>
         </div>
     </section>
-<section class="controls-bar">
+
+
+    <section class="controls-bar">
         <div class="controls-left">
             <button type="button" class="btn-ghost" id="add-rater-btn">+ Добавить оценщика</button>
 
@@ -101,40 +35,14 @@
             <button type="button" class="btn-ghost" id="new-track-btn">
                 Новый трек
             </button>
-{% if is_admin %}
-            <button type="button" class="btn-danger-outline" id="btn-open-clear-queue">
-                🗑 Очистить очередь
-            </button>
-            {% endif %}
         </div>
     </section>
 
 
-    
-<aside id="queue-panel" class="queue-dock-left" aria-label="Очередь треков">
-            <div class="queue-list-card">
-                <div class="queue-card-header">
-                    <div>
-                        <div class="queue-card-title">Очередь</div>
-                        <div class="queue-card-subtitle">Треки от зрителей (wav/mp3, до 50 МБ)</div>
-                    </div>
-                    <div class="queue-card-meta">
-                        <div id="queue-count-meta">—</div>
-</div>
-                </div>
-
-                <div class="queue-items" id="queue-items"></div>
-                <div class="queue-empty" id="queue-empty" style="display:none;">
-                    Очередь пуста.
-                </div>
-            </div>
-        </aside>
-
-<section class="panels-section">
-    <div class="panels-grid" id="panels-container"></div>
-    </div>
-</section>
-
+    <section class="panels-section">
+        <div class="panels-grid" id="panels-container">
+        </div>
+    </section>
 
     <footer class="global-footer">
         <div class="global-total-card">
@@ -143,32 +51,6 @@
         </div>
     </footer>
 </div>
-
-{% if is_admin %}
-<div class="modal-backdrop" id="clear-queue-modal-backdrop" aria-hidden="true">
-    <div class="modal-card modal-card--sm" role="dialog" aria-modal="true" aria-labelledby="clear-queue-title">
-        <div class="modal-header">
-            <div>
-                <div class="modal-title" id="clear-queue-title">Очистить очередь?</div>
-                <div class="modal-subtitle">Админ-действие</div>
-            </div>
-            <button type="button" class="modal-close-btn" id="clear-queue-close-btn" aria-label="Закрыть">×</button>
-        </div>
-        <div class="modal-body">
-            <p class="muted" style="margin:0; line-height: 1.45;">
-                Это действие уберёт все оставшиеся треки из очереди после стрима. Отменить будет нельзя.
-            </p>
-        </div>
-        <div class="modal-footer modal-footer--row">
-            <button type="button" class="btn-secondary" id="clear-queue-cancel-btn">Отмена</button>
-            <form method="post" action="{{ url_for('admin_clear_queue') }}">
-                <input type="hidden" name="confirm" value="yes">
-                <button type="submit" class="btn-danger">Очистить</button>
-            </form>
-        </div>
-    </div>
-</div>
-{% endif %}
 
 <div class="modal-backdrop" id="result-modal-backdrop">
     <div class="modal-card">
@@ -236,83 +118,5 @@
 
 <script>
     window.INITIAL_STATE = {{ initial_state|tojson }};
-    window.USER_ROLE = {{ (session.get('role') or '')|tojson }};
-    window.IS_ADMIN = {{ is_admin|tojson }};
 </script>
-
-<!-- Docked player (Yandex-style) -->
-<div class="yplayer-dock" id="yplayer-dock">
-  <div class="yplayer-dock-inner">
-    <audio id="sync-audio"
-                       class="sync-audio-hidden{% if not is_admin %} sync-audio--locked{% endif %}"
-                       preload="metadata"></audio>
-
-                <div class="yplayer" id="sync-player" role="group" aria-label="Плеер">
-                    <div class="yplayer__left">
-                        <button class="yplayer__btn yplayer__btn--play" id="player-play-btn" type="button" aria-label="Play/Pause">
-                            <span class="yplayer__icon yplayer__icon--play" id="yplayer-icon"></span>
-                        </button>
-                        <div class="yplayer__meta">
-                            <div class="yplayer__title" id="yplayer-title">—</div>
-                            <div class="yplayer__subtitle" id="yplayer-subtitle">—</div>
-                        </div>
-                    </div>
-
-                    <div class="yplayer__center">
-                        <div class="yplayer__progress" id="yplayer-progress" aria-label="Прогресс">
-                            <span class="yplayer__time" id="yplayer-time-current">0:00</span>
-                            <div class="yplayer__bar" id="yplayer-bar" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
-                                <div class="yplayer__bar-fill" id="yplayer-bar-fill"></div>
-                                <div class="yplayer__bar-handle" id="yplayer-bar-handle"></div>
-                            </div>
-                            <span class="yplayer__time" id="yplayer-time-total">0:00</span>
-                        </div>
-                    </div>
-
-                    <div class="yplayer__right">
-                        <button class="yplayer__btn" id="player-stop-btn" type="button" aria-label="Stop">■</button>
-                        <div class="yplayer__volume">
-                            <button class="yplayer__btn" id="yplayer-mute-btn" type="button" aria-label="Mute">🔊</button>
-                            <input class="yplayer__vol" id="yplayer-vol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Громкость">
-                        </div>
-                    </div>
-                </div>
-  </div>
-</div>
-
-
-
-
-<script>
-(function () {
-  var openBtn = document.getElementById('btn-open-clear-queue');
-  var backdrop = document.getElementById('clear-queue-modal-backdrop');
-  var closeBtn = document.getElementById('clear-queue-close-btn');
-  var cancelBtn = document.getElementById('clear-queue-cancel-btn');
-
-  if (!openBtn || !backdrop) return;
-
-  function openModal() {
-    backdrop.classList.add('is-open');
-    backdrop.setAttribute('aria-hidden', 'false');
-  }
-  function closeModal() {
-    backdrop.classList.remove('is-open');
-    backdrop.setAttribute('aria-hidden', 'true');
-  }
-
-  openBtn.addEventListener('click', openModal);
-  if (closeBtn) closeBtn.addEventListener('click', closeModal);
-  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-
-  backdrop.addEventListener('click', function (e) {
-    if (e.target === backdrop) closeModal();
-  });
-
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
-  });
-})();
-</script>
-
 {% endblock %}
