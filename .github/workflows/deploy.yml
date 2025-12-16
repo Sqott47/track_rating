@@ -80,6 +80,7 @@ jobs:
             sudo systemctl restart track_rating.service
             sudo systemctl status track_rating.service --no-pager -l
 
+
             # Cleanup old releases (keep last 10)
             cd "$BASE/releases"
             ls -1dt */ | tail -n +11 | xargs -r rm -rf
