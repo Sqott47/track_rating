@@ -18,6 +18,10 @@ static/uploads/
 
 # Archives
 *.zip
+*.mp3
+*.wav
+*.txt
+
 
 # OS
 .DS_Store
