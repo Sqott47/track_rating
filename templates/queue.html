@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}Очередь треков · ANTIGAZ{% endblock %}
+
+{% block content %}
+<div class="page-content" id="queue-public-page">
+    <section class="top-panel">
+        <div class="top-panel-main">
+            <div class="top-panel-label">Очередь треков</div>
+            <p class="top-panel-subtext">
+                Закинь трек в очередь: укажи исполнителя/название и загрузи файл.
+                Трек сразу считается готовым и попадает в общую очередь.
+            </p>
+
+            <div class="track-current" style="margin-top: 10px;">
+                <span class="track-current-label">Сейчас играет:</span>
+                <span class="track-current-value" id="queue-current-value">
+                    {% if active_track %}{{ active_track.display_name }}{% else %}—{% endif %}
+                </span>
+            </div>
+        </div>
+        <div class="top-panel-secondary">
+            <div class="queue-stats">
+                <div class="queue-stat">
+                    <div class="queue-stat-label">В очереди</div>
+                    <div class="queue-stat-value" id="queue-stat-queued">{{ queue_counts.get('queued', 0) }}</div>
+                </div>
+                <div class="queue-stat">
+                    <div class="queue-stat-label">Ошибки</div>
+                    <div class="queue-stat-value" id="queue-stat-failed">{{ queue_counts.get('failed', 0) }}</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="top-list-section">
+        <div class="top-table-card">
+            <div class="queue-upload-grid">
+                <div class="queue-upload-col">
+                    <h2 class="queue-block-title">Добавить трек</h2>
+                    <form class="queue-form" action="{{ url_for('queue_submit') }}" method="post" enctype="multipart/form-data">
+                        <div class="queue-form-row">
+                            <label class="queue-field">
+                                <span class="queue-field-label">Исполнитель</span>
+                                <input class="queue-input" type="text" name="artist" placeholder="Например: ANTIGAZ" maxlength="255" autocomplete="off">
+                            </label>
+                            <label class="queue-field">
+                                <span class="queue-field-label">Название трека</span>
+                                <input class="queue-input" type="text" name="title" placeholder="Например: GAZ MODE" maxlength="255" autocomplete="off">
+                            </label>
+                        </div>
+
+                        <label class="queue-field">
+                            <span class="queue-field-label">Файл</span>
+                            
+                            <div class="queue-filepicker">
+                                <input id="queue-file-input" class="queue-file-input" type="file" name="file" accept=".mp3,.wav,audio/mpeg,audio/wav" required>
+                                <label class="queue-file-btn" for="queue-file-input">Выберите файл</label>
+                                <div class="queue-file-name" id="queue-file-name">Файл не выбран</div>
+                            </div>
+                            <div class="queue-hint">
+                                Форматы: {{ allowed_exts|join(', ') }} · Максимум: {{ max_mb }} МБ
+                            </div>
+                        </label>
+
+                        <button type="submit" class="btn-primary">Отправить в очередь</button>
+                        <div class="queue-hint" style="margin-top: 8px;">
+                            После загрузки трек сразу появится в очереди.
+                        </div>
+                    </form>
+                </div>
+                <div class="queue-upload-col">
+                    <h2 class="queue-block-title">Очередь</h2>
+                    
+                    <div class="queue-items" id="queue-public-list">
+                        {% if queue_items %}
+                            {% for item in queue_items %}
+                                <div class="queue-item">
+                                    <div class="queue-item-main">
+                                        <div class="queue-item-title">
+                                            <span class="queue-item-number">
+                                                {% if item.queue_position %}{{ item.queue_position }}{% else %}{{ loop.index }}{% endif %}.
+                                            </span>
+                                            {{ item.display_name }}
+                                        </div>
+                                        <div class="queue-item-meta">
+                                            <span class="queue-priority-pill">P{{ item.priority }}</span>
+
+                                            {% if item.status == 'queued' %}
+                                                <span class="queue-status queue-status--queued">в очереди</span>
+                                            {% elif item.status == 'failed' %}
+                                                <span class="queue-status queue-status--failed">ошибка</span>
+                                            {% else %}
+                                                <span class="queue-status">{{ item.status }}</span>
+                                            {% endif %}
+
+                                            <span class="queue-item-date">
+                                                {% if item.created_at %}
+                                                    {{ item.created_at[8:10] }}.{{ item.created_at[5:7] }}.{{ item.created_at[0:4] }}
+                                                {% else %}
+                                                    —
+                                                {% endif %}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="queue-empty"><em>Очередь пуста.</em></div>
+                        {% endif %}
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const input = document.getElementById('queue-file-input');
+  const nameEl = document.getElementById('queue-file-name');
+  if (!input || !nameEl) return;
+  input.addEventListener('change', function () {
+    const file = input.files && input.files.length ? input.files[0] : null;
+    nameEl.textContent = file ? file.name : 'Файл не выбран';
+  });
+});
+</script>
+{% endblock %}

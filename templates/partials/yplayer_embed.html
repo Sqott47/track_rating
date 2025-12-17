@@ -1,0 +1,44 @@
+{#
+  Embedded player ("yplayer") for track page.
+  Visually matches the panel dock player, but works standalone (no SocketIO).
+
+  Required vars:
+    - audio_src: URL to audio file
+  Optional vars:
+    - player_title: string (usually track title)
+    - player_subtitle: string (usually artist)
+    - player_id: DOM id
+#}
+<div class="yplayer yplayer--embedded" data-yplayer-embed{% if player_id %} id="{{ player_id }}"{% endif %}>
+  <audio class="yplayer__audio" preload="metadata" src="{{ audio_src }}"></audio>
+
+  <div class="yplayer__left">
+    <button class="yplayer__btn yplayer__btn--play" type="button" data-yplayer-toggle aria-label="Play/Pause">
+      <span class="yplayer__icon yplayer__icon--play"></span>
+    </button>
+    <div class="yplayer__meta">
+      <div class="yplayer__title">{{ player_title if player_title is defined and player_title else "Прослушивание" }}</div>
+      <div class="yplayer__subtitle">{{ player_subtitle if player_subtitle is defined and player_subtitle else "" }}</div>
+    </div>
+  </div>
+
+  <div class="yplayer__center">
+    <div class="yplayer__time">
+      <span class="yplayer__time-cur" data-yplayer-time-current>0:00</span>
+    </div>
+    <div class="yplayer__bar" data-yplayer-bar>
+      <div class="yplayer__bar-fill" data-yplayer-fill></div>
+      <div class="yplayer__bar-knob" data-yplayer-handle></div>
+    </div>
+    <div class="yplayer__time">
+      <span class="yplayer__time-dur" data-yplayer-time-total>0:00</span>
+    </div>
+  </div>
+
+  <div class="yplayer__right">
+    <button class="yplayer__btn yplayer__btn--mute" type="button" data-yplayer-mute aria-label="Mute">
+      <span class="yplayer__icon yplayer__icon--vol"></span>
+    </button>
+    <input class="yplayer__vol" type="range" min="0" max="1" step="0.01" value="0.8" data-yplayer-vol aria-label="Volume">
+  </div>
+</div>
