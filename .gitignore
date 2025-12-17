@@ -1,0 +1,28 @@
+# IDE
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime/data
+*.db
+*.sqlite*
+app.sock
+
+# Uploads (хранить на сервере в shared)
+static/uploads/
+
+# Archives
+*.zip
+*.mp3
+*.wav
+*.txt
+
+
+# OS
+.DS_Store
+Thumbs.db

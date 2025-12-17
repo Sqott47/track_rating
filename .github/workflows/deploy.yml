@@ -1,0 +1,86 @@
+name: Deploy to VDS
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build release archive
+        run: |
+          tar \
+            --exclude='./release.tgz' \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.idea' \
+            --exclude='.vscode' \
+            --exclude='.venv' \
+            --exclude='venv' \
+            --exclude='*.db' \
+            --exclude='static/uploads' \
+            --exclude='app.sock' \
+            --exclude='*.zip' \
+            -czf /tmp/release.tgz .
+
+          mv /tmp/release.tgz ./release.tgz
+      
+
+      - name: Upload archive to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          source: "release.tgz"
+          target: "/tmp"
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            set -euo pipefail
+
+            BASE=/var/www/track_rating
+            TS=$(date +%Y%m%d_%H%M%S)
+            REL=$BASE/releases/$TS
+
+            mkdir -p "$REL"
+            tar -xzf /tmp/release.tgz -C "$REL"
+
+            # Link shared DB
+            if [ -f "$BASE/shared/track_ratings.db" ]; then
+              ln -sfn "$BASE/shared/track_ratings.db" "$REL/track_ratings.db"
+            fi
+
+            # Link shared uploads
+            mkdir -p "$REL/static"
+            if [ -d "$BASE/shared/uploads" ]; then
+              ln -sfn "$BASE/shared/uploads" "$REL/static/uploads"
+            fi
+
+            # Activate release
+            ln -sfn "$REL" "$BASE/current"
+
+            # Install deps (if requirements.txt exists)
+            if [ -f "$BASE/current/requirements.txt" ]; then
+              $BASE/venv/bin/pip install -r "$BASE/current/requirements.txt"
+            fi
+
+            # Restart service
+            sudo systemctl restart track_rating.service
+            sudo systemctl status track_rating.service
+
+
+            # Cleanup old releases (keep last 10)
+            cd "$BASE/releases"
+            ls -1dt */ | tail -n +11 | xargs -r rm -rf
