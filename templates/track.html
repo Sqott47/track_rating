@@ -1,0 +1,401 @@
+{% extends "base.html" %}
+
+{% block title %}Трек · {{ track.name }} · ANTIGAZ{% endblock %}
+
+{% block content %}
+<div class="page-content" id="track-page-root">
+    <section class="top-panel">
+        <div class="top-panel-main">
+            <div class="top-panel-label">Карточка трека</div>
+            <p class="top-panel-subtext">
+                Минималистичная сводка по оценкам трека и комментариям слушателей.
+            </p>
+            <a href="{{ url_for('top_tracks') }}" class="btn-ghost track-back-btn">
+                <span class="track-back-icon">←</span>
+                <span>Вернуться к топу</span>
+            </a>
+        </div>
+    </section>
+
+    <section class="top-list-section">
+        <div class="top-table-card track-hero-card">
+            <div class="track-hero-header">
+                <div>
+                    <h1 class="track-title">{{ track.name }}</h1>
+                    <p class="track-meta">
+                        Добавлен: {{ track.created_at.strftime('%d.%m.%Y %H:%M') if track.created_at else 'Дата неизвестна' }}
+                    </p>
+                </div>
+                <div class="track-hero-actions">
+                    <button type="button" class="btn-primary" id="track-open-rate-btn">
+                        Оценить трек
+                    </button>
+                    <div class="track-share-wrapper">
+                        <button type="button"
+                                class="btn-ghost track-share-trigger"
+                                id="track-share-btn"
+                                aria-haspopup="true"
+                                aria-expanded="false"
+                                data-share-url="{{ url_for('track_page', track_id=track.id, _external=True) }}">
+                            <span class="track-share-icon">⤴</span>
+                            <span class="track-share-label">Поделиться</span>
+                        </button>
+                        <div class="track-share-popover" id="track-share-popover">
+                            <div class="track-share-popover-inner">
+                                <div class="track-share-popover-title">Поделиться треком</div>
+                                <div class="track-share-popover-grid">
+                                    <button type="button" class="track-share-option" data-share-kind="tg">
+                                        <span class="track-share-option-main">Telegram</span>
+                                        <span class="track-share-option-sub">Открыть окно шаринга</span>
+                                    </button>
+                                    <button type="button" class="track-share-option" data-share-kind="vk">
+                                        <span class="track-share-option-main">VK</span>
+                                        <span class="track-share-option-sub">Поделиться во VK</span>
+                                    </button>
+                                    <button type="button" class="track-share-option" data-share-kind="copy">
+                                        <span class="track-share-option-main">Скопировать ссылку</span>
+                                        <span class="track-share-option-sub">В буфер обмена</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {% if audio_url %}
+                <div class="track-audio-block">
+                    <div class="track-audio-label">Прослушивание</div>
+                    {# Кастомный плеер в стиле панели оценки (без SocketIO-синхронизации) #}
+                    {% set audio_src = audio_url %}
+                    {% set player_id = "track-player-" ~ (track.id if track is defined else "single") %}
+                    {% set player_title = player_title %}
+                    {% set player_subtitle = player_subtitle %}
+                    {% include "partials/yplayer_embed.html" %}
+                </div>
+            {% endif %}
+
+            <div class="track-summary-grid">
+                <div class="track-summary-main">
+                    <div class="track-overall-block">
+                        <div class="track-overall-label">Итоговый средний балл</div>
+                        <div class="track-overall-value score-chip" id="track-page-overall">
+                            {% if overall_avg is not none %}
+                                {{ '%.2f'|format(overall_avg) }}
+                            {% else %}
+                                ?
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="track-section">
+                        <h2 class="track-section-title">Параметры (стримеры)</h2>
+                        <table class="stats-table">
+                            <thead>
+                                <tr>
+                                    <th>Параметр</th>
+                                    <th>Средний балл</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if criteria_stats %}
+                                    {% for c in criteria_stats %}
+                                        <tr>
+                                            <td data-label="Параметр">
+                                                {% for key, label in CRITERIA %}
+                                                    {% if key == c.key %}
+                                                        {{ label }}
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </td>
+                                            <td class="track-score-cell" data-label="Средний балл">
+                                                {% if c.avg is not none %}
+                                                    <span class="score-chip">{{ '%.2f'|format(c.avg) }}</span>
+                                                {% else %}
+                                                    ?
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="2"><em>Пока нет оценок стримеров.</em></td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="track-section">
+                        <h2 class="track-section-title">Параметры (зрители)</h2>
+                        <table class="stats-table">
+                            <thead>
+                                <tr>
+                                    <th>Параметр</th>
+                                    <th>Средний балл</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if viewer_criteria_stats %}
+                                    {% for c in viewer_criteria_stats %}
+                                        <tr>
+                                            <td data-label="Параметр">
+                                                {% for key, label in CRITERIA %}
+                                                    {% if key == c.key %}
+                                                        {{ label }}
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </td>
+                                            <td class="track-score-cell" data-label="Средний балл">
+                                                {% if c.avg is not none %}
+                                                    <span class="score-chip">{{ '%.2f'|format(c.avg) }}</span>
+                                                {% else %}
+                                                    ?
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="2"><em>Пока нет зрительских оценок.</em></td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                        <div class="track-viewer-overall">
+                            <span class="track-viewer-label">Общий средний балл зрителей:</span>
+                            <span class="score-chip">
+                                {% if viewer_overall is not none %}
+                                    {{ '%.2f'|format(viewer_overall) }}
+                                {% else %}
+                                    ?
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <aside class="track-summary-side">
+                    <div class="track-section">
+                        <h2 class="track-section-title">Оценщики</h2>
+                        <table class="stats-table">
+                            <thead>
+                                <tr>
+                                    <th>Оценщик</th>
+                                    <th>Средний балл</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if raters_stats %}
+                                    {% for r in raters_stats %}
+                                        <tr>
+                                            <td data-label="Оценщик">{{ r.name }}</td>
+                                            <td class="track-score-cell" data-label="Средний балл">
+                                                {% if r.avg is not none %}
+                                                    <span class="score-chip">{{ '%.2f'|format(r.avg) }}</span>
+                                                {% else %}
+                                                    ?
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="2"><em>Пока нет оценок стримеров для этого трека.</em></td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </section>
+
+    <section class="top-list-section" id="comments">
+        <div class="top-table-card">
+            <div class="home-section-header">
+                <h2 class="home-section-title">Комментарии</h2>
+                <p class="home-section-subtitle">
+                    Оставь своё мнение о треке. Комментарии сразу появляются под треком.
+                </p>
+            </div>
+
+            <form method="post" class="track-comment-form">
+                <div class="track-comment-grid">
+                    <label class="auth-field">
+                        <span>Имя (опционально)</span>
+                        <input type="text" name="author" maxlength="64" placeholder="Например: слушатель ANTIGAZ">
+                    </label>
+                    <label class="auth-field">
+                        <span>Комментарий</span>
+                        <textarea name="text"
+                                  rows="3"
+                                  maxlength="2000"
+                                  placeholder="Что думаешь об этом треке?"></textarea>
+                    </label>
+                </div>
+                <div class="admin-actions">
+                    <button type="submit" class="btn-primary">Отправить комментарий</button>
+                </div>
+            </form>
+
+            <div class="track-comments-list">
+                {% if comments %}
+                    {% for c in comments %}
+                        <article class="track-comment-item">
+                            <div class="track-comment-header">
+                                <div class="track-comment-header-main">
+                                    <span class="track-comment-author">{{ c.author_name or 'Аноним' }}</span>
+                                    <span class="track-comment-date">
+                                        {{ c.created_at.strftime('%d.%m.%Y %H:%M') if c.created_at else '' }}
+                                    </span>
+                                </div>
+                                {% if is_admin %}
+                                <form method="post" class="track-comment-delete-form">
+                                    <input type="hidden" name="delete_comment_id" value="{{ c.id }}">
+                                    <button type="submit" class="track-comment-delete-btn" title="Скрыть комментарий">✕</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                            <p class="track-comment-text">{{ c.text }}</p>
+                        </article>
+                    {% endfor %}
+                {% else %}
+                    <p class="field-hint">Пока нет ни одного комментария. Будь первым!</p>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+</div>
+
+
+<div class="modal-backdrop" id="viewer-modal-backdrop">
+    <div class="modal-card viewer-modal">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title" id="viewer-modal-title">Оценка трека</div>
+                <div class="modal-subtitle" id="viewer-modal-subtitle">Выберите оценки по параметрам</div>
+            </div>
+            <button type="button" class="modal-close-btn" id="viewer-modal-close">×</button>
+        </div>
+        <div class="modal-body">
+            
+            <div class="modal-columns">
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Твои оценки</h3>
+                    {% for key, label in CRITERIA %}
+                        <div class="slider-row viewer-slider-row">
+                            <div class="slider-label">{{ label }}</div>
+                            <div class="slider-control">
+                                <input type="range"
+                                       min="0" max="10" step="1" value="0"
+                                       class="viewer-slider"
+                                       data-criterion="{{ key }}">
+                                <div class="slider-value score-chip" data-criterion-value="{{ key }}">0</div>
+                            </div>
+                        </div>
+                    {% endfor %}
+
+                    <div class="modal-overall viewer-self-overall">
+                        <div class="modal-overall-label">Твой текущий общий балл:</div>
+                        <div class="modal-overall-row">
+                            <div class="modal-overall-value score-chip" id="viewer-self-overall">0.0</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Средний балл зрителей</h3>
+                    <div class="modal-overall">
+                        <div class="modal-overall-label">По версии чата:</div>
+                        <div class="modal-overall-row">
+                            <div class="modal-overall-value score-chip" id="viewer-modal-overall">0.00</div>
+                        </div>
+                    </div>
+                    <div class="viewer-message viewer-message--thanks" id="viewer-thanks" style="display:none;">
+                        Спасибо за оценку, GAZ!
+                    </div>
+                    <div class="viewer-message viewer-message--already" id="viewer-already" style="display:none;">
+                        Ты уже оценивал этот трек.
+                    </div>
+                </div>
+            </div>
+</div>
+
+            <div class="modal-footer">
+                <button class="btn-primary" id="viewer-submit-btn">Оценить трек</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="{{ url_for('static', filename='js/viewers.js') }}"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var overallEl = document.getElementById("track-page-overall");
+    if (overallEl) {
+        var val = parseFloat(overallEl.textContent.replace(",", "."));
+        if (!isNaN(val) && typeof window.applyHeatToChip === "function") {
+            window.applyHeatToChip(overallEl, val);
+        }
+    }
+
+    // Открыть модалку зрительской оценки прямо на странице трека
+    var rateBtn = document.getElementById("track-open-rate-btn");
+    if (rateBtn && window.openViewerRatingModal) {
+        rateBtn.addEventListener("click", function () {
+            window.openViewerRatingModal({{ track.id }});
+        });
+    }
+
+    // Поповер шаринга
+    var shareBtn = document.getElementById("track-share-btn");
+    var popover = document.getElementById("track-share-popover");
+    if (shareBtn && popover) {
+        var shareUrl = shareBtn.getAttribute("data-share-url") || window.location.href;
+        function togglePopover() {
+            var isOpen = popover.classList.toggle("is-open");
+            shareBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        }
+        shareBtn.addEventListener("click", function (e) {
+            e.stopPropagation();
+            togglePopover();
+        });
+        document.addEventListener("click", function () {
+            popover.classList.remove("is-open");
+            shareBtn.setAttribute("aria-expanded", "false");
+        });
+        popover.addEventListener("click", function (e) {
+            e.stopPropagation();
+        });
+
+        Array.prototype.slice.call(popover.querySelectorAll(".track-share-option")).forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var kind = btn.getAttribute("data-share-kind");
+                var urlEnc = encodeURIComponent(shareUrl);
+                if (kind === "tg") {
+                    var tgUrl = "https://t.me/share/url?url=" + urlEnc;
+                    window.open(tgUrl, "_blank");
+                } else if (kind === "vk") {
+                    var vkUrl = "https://vk.com/share.php?url=" + urlEnc;
+                    window.open(vkUrl, "_blank");
+                } else {
+                    // Discord и копирование — просто копируем ссылку
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(shareUrl);
+                    } else {
+                        prompt("Скопируй ссылку на трек:", shareUrl);
+                    }
+                }
+                popover.classList.remove("is-open");
+                shareBtn.setAttribute("aria-expanded", "false");
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

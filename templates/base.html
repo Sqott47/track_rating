@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}Оценка треков{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
+    {% block head_extra %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+<div class="page-bg"></div>
+<div id="bg-rain-layer"></div>
+
+
+<header class="top-bar">
+    <div class="top-bar-inner">
+        <div class="top-bar-left">
+            <a href="{{ url_for('home') }}" class="logo">
+                <img src="{{ url_for('static', filename='img/logo.jpg') }}" alt="ANTIGAZ Logo">
+            </a>
+            <div class="brand-block">
+                <div class="brand-title">ANTIGAZ</div>
+                <div class="brand-subtitle">community hub</div>
+                <nav class="top-bar-nav" id="top-bar-nav">
+                    <a href="{{ url_for('home') }}" class="nav-link">Главная</a>
+                    <a href="{{ url_for('top_tracks') }}" class="nav-link">Топ треков</a>
+                    <a href="{{ url_for('viewers_page') }}" class="nav-link">Оценить трек</a>
+                    <a href="{{ url_for('queue_page') }}" class="nav-link">Очередь</a>
+                    {% set user_role = session.get('role') %}
+                    {% if user_role in ['admin', 'superadmin', 'judge'] %}
+                        <a href="{{ url_for('index') }}" class="nav-link">Панель оценки</a>
+                    {% endif %}
+                    {% if user_role in ['admin', 'superadmin'] %}
+                        <a href="{{ url_for('admin') }}" class="nav-link">Админка</a>
+                    {% endif %}
+                </nav>
+            </div>
+        </div>
+        <div class="top-bar-right">
+            <button type="button" class="nav-toggle" id="nav-toggle" aria-label="Переключить меню">
+                <span class="nav-toggle-icon"></span>
+                <span class="nav-toggle-label">Меню</span>
+            </button>
+            {% if session.get('user') %}
+                {% set user_role = session.get('role') %}
+                <div class="user-pill">
+                    <span class="user-dot"></span>
+                    <span class="user-name">
+                        {% if user_role == 'judge' %}
+                            Оценщик
+                        {% elif user_role == 'superadmin' %}
+                            Главный админ
+                        {% else %}
+                            Админ
+                        {% endif %}
+                    </span>
+                </div>
+                <a href="{{ url_for('logout') }}" class="logout-link">Выйти</a>
+            {% else %}
+                <a href="{{ url_for('login') }}" class="logout-link">Войти</a>
+            {% endif %}
+        </div>
+    </div>
+</header>
+
+
+<main class="main-wrapper">
+    {% block content %}{% endblock %}
+</main>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <script>
+            window.__FLASH_MESSAGES__ = {{ messages|tojson }};
+        </script>
+    {% endif %}
+{% endwith %}
+
+{% block scripts %}
+<script src="https://cdn.socket.io/3.1.3/socket.io.min.js" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/yplayer_embed.js') }}"></script>
+{% endblock %}
+
+<style>
+    #toast-container {
+        position: fixed;
+        right: 16px;
+        top: 80px;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-width: 360px;
+    }
+    .toast {
+        padding: 10px 14px;
+        border-radius: 12px;
+        background: rgba(12, 16, 24, 0.94);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: #fff;
+        font-size: 14px;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        opacity: 0;
+        transform: translateY(-6px);
+        transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+    }
+    .toast--visible {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    .toast--success {
+        border-color: rgba(0, 200, 120, 0.9);
+    }
+    .toast--error {
+        border-color: rgba(255, 80, 80, 0.9);
+    }
+    .toast--warning {
+        border-color: rgba(255, 190, 80, 0.9);
+    }
+    .toast-icon {
+        font-size: 16px;
+        line-height: 1;
+        margin-top: 1px;
+    }
+    .toast-message {
+        flex: 1;
+    }
+    .toast-close {
+        border: none;
+        background: transparent;
+        color: rgba(255,255,255,0.6);
+        cursor: pointer;
+        padding: 0;
+        margin-left: 4px;
+        font-size: 16px;
+        line-height: 1;
+    }
+</style>
+
+<script>
+    (function () {
+        function iconForCategory(category) {
+            if (category === "success") return "✅";
+            if (category === "error") return "⚠️";
+            if (category === "warning") return "⚠️";
+            return "ℹ️";
+        }
+
+        function showToasts(messages) {
+            if (!messages || !messages.length) return;
+            var existing = document.getElementById("toast-container");
+            var container = existing || document.createElement("div");
+            if (!existing) {
+                container.id = "toast-container";
+                document.body.appendChild(container);
+            }
+
+            messages.forEach(function (item, idx) {
+                var category = item[0] || "info";
+                var text = item[1] || "";
+
+                var toast = document.createElement("div");
+                toast.className = "toast toast--" + category;
+
+                var icon = document.createElement("div");
+                icon.className = "toast-icon";
+                icon.textContent = iconForCategory(category);
+
+                var msg = document.createElement("div");
+                msg.className = "toast-message";
+                msg.textContent = text;
+
+                var close = document.createElement("button");
+                close.type = "button";
+                close.className = "toast-close";
+                close.textContent = "×";
+                close.addEventListener("click", function () {
+                    toast.classList.remove("toast--visible");
+                    setTimeout(function () {
+                        if (toast.parentNode) {
+                            toast.parentNode.removeChild(toast);
+                        }
+                    }, 180);
+                });
+
+                toast.appendChild(icon);
+                toast.appendChild(msg);
+                toast.appendChild(close);
+                container.appendChild(toast);
+
+                setTimeout(function () {
+                    toast.classList.add("toast--visible");
+                }, 20);
+
+                setTimeout(function () {
+                    toast.classList.remove("toast--visible");
+                    setTimeout(function () {
+                        if (toast.parentNode) {
+                            toast.parentNode.removeChild(toast);
+                        }
+                    }, 180);
+                }, 4500 + idx * 300);
+            });
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            if (window.__FLASH_MESSAGES__ && Array.isArray(window.__FLASH_MESSAGES__)) {
+                showToasts(window.__FLASH_MESSAGES__);
+            }
+        });
+    })();
+</script>
+
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        var btn = document.getElementById("nav-toggle");
+        var nav = document.getElementById("top-bar-nav");
+        if (!btn || !nav) return;
+        btn.addEventListener("click", function () {
+            var isOpen = nav.classList.toggle("nav-open");
+            btn.classList.toggle("nav-toggle--active", isOpen);
+        });
+    });
+</script>
+
+</body>
+</html>

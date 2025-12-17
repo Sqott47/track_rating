@@ -1,0 +1,467 @@
+{% extends "base.html" %}
+
+{% block title %}Админка · ANTIGAZ{% endblock %}
+
+{% block content %}
+<div class="page-content">
+    <section class="top-panel">
+        <div class="top-panel-main">
+            <div class="top-panel-label">Админка ANTIGAZ</div>
+            <p class="top-panel-subtext">
+                Управление новостями и внутренним хабом. Позже здесь появятся стрим‑настройки и админ‑аккаунты.
+            </p>
+        </div>
+    </section>
+
+    <section class="admin-tabs-bar">
+        <div class="admin-tabs">
+            <button type="button"
+                    class="admin-tab {% if active_tab == 'news' %}admin-tab--active{% endif %}"
+                    data-admin-tab="news">Новости</button>
+            <button type="button"
+                    class="admin-tab {% if active_tab == 'stream' %}admin-tab--active{% endif %}"
+                    data-admin-tab="stream">Стрим</button>
+            <button type="button"
+                    class="admin-tab {% if active_tab == 'comments' %}admin-tab--active{% endif %}"
+                    data-admin-tab="comments">Комментарии</button>
+            {% if current_user and current_user.is_superadmin() %}
+            <button type="button"
+                    class="admin-tab {% if active_tab == 'users' %}admin-tab--active{% endif %}"
+                    data-admin-tab="users">Админы</button>
+            {% endif %}
+        </div>
+    </section>
+
+
+    <section class="home-admin-grid admin-section {% if active_tab == 'comments' %}admin-section--active{% endif %}"
+             data-admin-section="comments">
+        <div class="home-block">
+            <div class="home-section-header">
+                <h2 class="home-section-title">Комментарии к трекам</h2>
+                <p class="home-section-subtitle">
+                    Комментарии слушателей под треками. Можно быстро скрыть лишнее.
+                </p>
+            </div>
+            <p class="field-hint">
+                Комментарии сразу появляются под треком. Здесь можно скрывать их при необходимости.
+            </p>
+        </div>
+
+        <div class="home-block">
+            <div class="home-section-header">
+                <h2 class="home-section-title">Список комментариев</h2>
+                <p class="home-section-subtitle">
+                    Сначала идут не одобренные комментарии, затем уже одобренные.
+                </p>
+            </div>
+
+            <div class="admin-comments-table-wrapper">
+                {% if track_comments %}
+                <table class="admin-users-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Трек</th>
+                            <th>Автор</th>
+                            <th>Текст</th>
+                            <th>Дата</th>
+                            <th>Статус</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in track_comments %}
+                            {% set comment = row[0] %}
+                            {% set track = row[1] %}
+                            <tr>
+                                <td data-label="ID">#{{ comment.id }}</td>
+                                <td data-label="Трек">
+                                    {% if track %}
+                                        <a href="{{ url_for('track_page', track_id=track.id) }}" target="_blank">
+                                            {{ track.name }}
+                                        </a>
+                                    {% else %}
+                                        <em>Удалённый трек</em>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Автор">{{ comment.author_name or 'Аноним' }}</td>
+                                <td data-label="Текст" style="max-width: 260px; white-space: normal;">
+                                    {{ comment.text }}
+                                </td>
+                                <td data-label="Дата">
+                                    {{ comment.created_at.strftime('%d.%m.%Y %H:%M') if comment.created_at else '' }}
+                                </td>
+                                <td data-label="Статус">
+                                    {% if comment.is_deleted %}
+                                        <span class="news-tag">Скрыт</span>
+                                    {% else %}
+                                        <span class="news-tag">Опубликован</span>
+                                    {% endif %}
+                                </td>
+                                <td data-label="Действия">
+                                    <form method="post" style="display:inline-block;">
+                                        <input type="hidden" name="form" value="comments">
+                                        <input type="hidden" name="comment_id" value="{{ comment.id }}">
+                                        <input type="hidden" name="action" value="delete">
+                                        <button type="submit" class="btn-danger">
+                                            Скрыть
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                    <p class="field-hint">Пока нет ни одного комментария.</p>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="home-admin-grid admin-section {% if active_tab == 'news' %}admin-section--active{% endif %}" data-admin-section="news">
+        <div class="home-block">
+            <div class="home-section-header">
+                <h2 class="home-section-title">Добавить новость</h2>
+                <p class="home-section-subtitle">
+                    Пиши сюда крупные обновления, анонсы стримов и важные изменения.
+                </p>
+            </div>
+
+            <form method="post" class="admin-news-form" enctype="multipart/form-data">
+                <input type="hidden" name="form" value="news">
+                <label class="auth-field">
+                    <span>Заголовок</span>
+                    <input type="text" name="title" required maxlength="255" placeholder="Например: Запуск ANTIGAZ Hub">
+                </label>
+                <label class="auth-field">
+                    <span>Тег (опционально)</span>
+                    <input type="text" name="tag" maxlength="64" placeholder="Анонс, Апдейт, Стрим...">
+                </label>
+                <label class="auth-field">
+                    <span>Текст новости <small class="field-hint">(поддерживаются базовые HTML-теги: &lt;b&gt;, &lt;a&gt;, &lt;br&gt;, &lt;img&gt;)</small></span>
+                    <textarea name="text" rows="4" placeholder="Кратко опиши, что изменилось или что планируется."></textarea>
+                </label>
+                <label class="auth-field">
+                    <span>Вложение (картинка, видео, файл)</span>
+                    <input type="file" name="attachment">
+                </label>
+                <div class="admin-actions">
+                    <button type="submit" class="btn-primary">Добавить новость</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="home-block">
+            <div class="home-section-header">
+                <h2 class="home-section-title">Лента новостей</h2>
+                <p class="home-section-subtitle">
+                    Смотри, как новости выглядят в общем фиде на главной.
+                </p>
+            </div>
+            <div class="home-news-list admin-news-list">
+                {% if news_list %}
+                    {% for n in news_list %}
+                    <article class="home-news-item">
+                        <div class="news-meta-row">
+                            {% if n.tag %}
+                                <span class="news-tag">{{ n.tag }}</span>
+                            {% endif %}
+                            <span class="news-date">
+                                {{ n.created_at.strftime('%d.%m.%Y %H:%M') if n.created_at else '' }}
+                            </span>
+                        </div>
+                        <h3 class="news-title">{{ n.title }}</h3>
+                        {% if n.text %}
+                            <p class="news-text">{{ n.text|safe }}</p>
+                        {% endif %}
+
+                        {% set attach_filename = attachments.get(n.id) %}
+                        {% if attach_filename %}
+                            <p class="news-attachment">
+                                <a href="{{ url_for('static', filename='uploads/' ~ attach_filename) }}"
+                                   target="_blank"
+                                   rel="noopener">
+                                    Вложение к новости
+                                </a>
+                            </p>
+                        {% endif %}
+
+                        <form method="post"
+                              action="{{ url_for('delete_news', news_id=n.id) }}"
+                              class="admin-news-actions"
+                              onsubmit="return confirm('Удалить эту новость?');">
+                            <button type="submit" class="btn-ghost-small">Удалить</button>
+                        </form>
+                    </article>
+                    {% endfor %}
+                {% else %}
+                    <p class="home-empty">Пока нет ни одной новости &mdash; самое время добавить первую.</p>
+                {% endif %}
+                {% if news_pagination and news_pagination.pages > 1 %}
+                <div class="home-pagination">
+                    {% if news_pagination.has_prev %}
+                        <a class="pager-link" href="{{ url_for('admin', page=news_pagination.prev_num) }}">&larr; Предыдущие</a>
+                    {% endif %}
+                    <span class="pager-info">
+                        Страница {{ news_pagination.page }} из {{ news_pagination.pages }}
+                    </span>
+                    {% if news_pagination.has_next %}
+                        <a class="pager-link" href="{{ url_for('admin', page=news_pagination.next_num) }}">Следующие &rarr;</a>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="home-admin-grid admin-section {% if active_tab == 'stream' %}admin-section--active{% endif %}" data-admin-section="stream">
+        <div class="home-block">
+            <div class="home-section-header">
+                <h2 class="home-section-title">Стрим / Live‑блок</h2>
+                <p class="home-section-subtitle">
+                    Управляй тем, что видит пользователь в блоке стрима на главной.
+                </p>
+            </div>
+            <form method="post" class="admin-news-form">
+                <input type="hidden" name="form" value="stream">
+                <label class="auth-field">
+                    <span>Заголовок стрима</span>
+                    <input type="text"
+                           name="stream_title"
+                           maxlength="255"
+                           placeholder="Например: Разбор треков + мемы"
+                           value="{{ stream_config.title if stream_config and stream_config.title else '' }}">
+                </label>
+                <label class="auth-field">
+                    <span>Ссылка на стрим (Twitch)</span>
+                    <input type="url"
+                           name="stream_url"
+                           placeholder="https://twitch.tv/..."
+                           value="{{ stream_config.url if stream_config and stream_config.url else '' }}">
+                </label>
+                <div class="admin-actions">
+                    <button type="submit" class="btn-primary">
+                        {% if stream_config and stream_config.is_active and stream_config.url %}
+                            Закончить стрим
+                        {% else %}
+                            Начать стрим
+                        {% endif %}
+                    </button>
+                </div>
+            </form>
+        </div>
+    
+        <div class="home-block">
+            <div class="home-section-header">
+                <h2 class="home-section-title">OBS-виджет</h2>
+                <p class="home-section-subtitle">
+                    Сгенерируй ссылку и вставь её в OBS как Browser Source.
+                    Ссылка не меняется, пока не нажмёшь «Сгенерировать новую».
+                </p>
+            </div>
+            <form method="post" class="admin-news-form">
+                <input type="hidden" name="form" value="stream_widget">
+                <label class="auth-field">
+                    <span>Ссылка для OBS-виджета</span>
+                    <div class="admin-widget-link-row">
+                        <input type="text"
+                               readonly
+                               onclick="this.select();"
+                               value="{% if widget_url %}{{ widget_url }}{% else %}Ссылка пока не сгенерирована{% endif %}">
+                        <button type="submit" class="btn-secondary">
+                            {% if widget_url %}
+                                Сгенерировать новую
+                            {% else %}
+                                Сгенерировать
+                            {% endif %}
+                        </button>
+                    </div>
+                </label>
+                <p class="home-section-subtitle" style="margin-top: 6px;">
+                    Скопируй эту ссылку и вставь её в OBS как Browser Source.
+                </p>
+            </form>
+        </div>
+</section>
+    <section class="home-admin-grid admin-section {% if active_tab == 'users' %}admin-section--active{% endif %}" data-admin-section="users">
+        <div class="home-block">
+            <div class="home-section-header">
+                <h2 class="home-section-title">Админ-аккаунты</h2>
+                <p class="home-section-subtitle">
+                    Только главный админ может создавать и удалять админов. Здесь можно выдать доступ к панели оценки.
+                </p>
+            </div>
+
+            {% if not current_user or not current_user.is_superadmin() %}
+                <p class="home-empty">Управлять админами может только главный админ.</p>
+            {% else %}
+                <form method="post" class="admin-news-form">
+                    <input type="hidden" name="form" value="users">
+                    <input type="hidden" name="action" value="create">
+                    <label class="auth-field">
+                        <span>Логин</span>
+                        <input type="text" name="username" maxlength="64" required placeholder="new_admin">
+                    </label>
+                    <label class="auth-field">
+                        <span>Пароль</span>
+                        <input type="text" name="password" required placeholder="Придумай пароль">
+                    </label>
+                    <label class="auth-field">
+                        <span>Роль</span>
+                        <select name="role">
+                            <option value="admin" selected>Админ</option>
+                            <option value="judge">Оценщик</option>
+                            <option value="superadmin">Главный админ</option>
+                        </select>
+                    </label>
+                    <div class="admin-actions">
+                        <button type="submit" class="btn-primary">Создать админа</button>
+                    </div>
+                </form>
+            {% endif %}
+        </div>
+
+        {% if current_user and current_user.is_superadmin() %}
+        <div class="home-block">
+            <div class="home-section-header">
+                <h2 class="home-section-title">Список админов</h2>
+                <p class="home-section-subtitle">
+                    Все пользователи с доступом к панели оценки и админке.
+                </p>
+            </div>
+            <div class="admin-users-list">
+                {% if users %}
+                    <table class="admin-users-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Логин</th>
+                                <th>Роль</th>
+                                <th>Создан</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for u in users %}
+                            <tr>
+                                <td>{{ u.id }}</td>
+                                <td>{{ u.username }}</td>
+                                <td>
+                                    {% if u.is_superadmin() %}
+                                        Главный админ
+                                    {% elif u.role == 'judge' %}
+                                        Оценщик
+                                    {% else %}
+                                        Админ
+                                    {% endif %}
+                                </td>
+                                <td>{{ u.created_at.strftime('%d.%m.%Y %H:%M') if u.created_at else '' }}</td>
+                                <td>
+                                    <form method="post" style="margin: 0;" onsubmit="return confirm('Удалить этого админа?');">
+                                        <input type="hidden" name="form" value="users">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                                        <button type="submit" class="btn-ghost-small" {% if u.is_superadmin() %}disabled{% endif %}>
+                                            Удалить
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p class="home-empty">Пока ни одного админа, кроме главного.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </section>
+
+</div>
+<style>
+    .admin-tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .admin-tab {
+        padding: 6px 14px;
+        border: none;
+        background: transparent;
+        color: rgba(255,255,255,0.7);
+        font-size: 14px;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+    }
+    .admin-tab--active {
+        color: #fff;
+        border-color: rgba(0, 186, 255, 0.9);
+    }
+    .admin-tabs-bar {
+        margin-top: 24px;
+        margin-bottom: 12px;
+    }
+    .admin-section {
+        display: none;
+    }
+    .admin-section--active {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.1fr);
+        gap: 24px;
+    }
+    @media (max-width: 900px) {
+        .admin-section--active {
+            display: block;
+        }
+    }
+
+    .admin-users-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+    .admin-users-table th,
+    .admin-users-table td {
+        padding: 6px 8px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .admin-users-table th {
+        text-align: left;
+        font-weight: 500;
+        opacity: 0.8;
+    }
+    .admin-users-table td:last-child {
+        text-align: right;
+    }
+
+</style>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        var tabButtons = document.querySelectorAll(".admin-tab");
+        var panels = document.querySelectorAll(".admin-section");
+        if (!tabButtons.length || !panels.length) return;
+
+        tabButtons.forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var target = btn.getAttribute("data-admin-tab");
+                if (!target) return;
+
+                tabButtons.forEach(function (b) {
+                    b.classList.toggle("admin-tab--active", b === btn);
+                });
+
+                panels.forEach(function (p) {
+                    var panelKey = p.getAttribute("data-admin-section");
+                    var isActive = panelKey === target;
+                    p.classList.toggle("admin-section--active", isActive);
+                });
+            });
+        });
+    });
+</script>
+
+{% endblock %}

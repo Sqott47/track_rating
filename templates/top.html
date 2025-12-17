@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}Топ треков · ANTIGAZ{% endblock %}
+
+{% block content %}
+<div class="page-content">
+    <section class="top-panel">
+        <div class="top-panel-main">
+            <div class="top-panel-label">Топ треков</div>
+            <p class="top-panel-subtext">
+                Все оценённые треки, отсортированные по среднему баллу.
+            </p>
+        </div>
+    </section>
+
+    <section class="top-list-section">
+        <div class="top-table-card">
+            <div class="top-table-wrapper">
+            <table class="top-table">
+                <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Трек</th>
+                    <th class="{% if sort_by == 'streamers' %}top-col-active{% endif %}">
+                        <a href="{{ url_for('top_tracks',
+                                            page=page,
+                                            sort_by='streamers',
+                                            direction=('asc' if sort_by == 'streamers' and direction == 'desc' else 'desc')) }}"
+                           class="top-sort-header-link">
+                            <span>Средний балл</span>
+                            {% if sort_by == 'streamers' %}
+                                <span class="top-sort-arrow">
+                                    {% if direction == 'asc' %}▲{% else %}▼{% endif %}
+                                </span>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th class="{% if sort_by == 'viewers' %}top-col-active{% endif %}">
+                        <a href="{{ url_for('top_tracks',
+                                            page=page,
+                                            sort_by='viewers',
+                                            direction=('asc' if sort_by == 'viewers' and direction == 'desc' else 'desc')) }}"
+                           class="top-sort-header-link">
+                            <span>Средний балл зрителей</span>
+                            {% if sort_by == 'viewers' %}
+                                <span class="top-sort-arrow">
+                                    {% if direction == 'asc' %}▲{% else %}▼{% endif %}
+                                </span>
+                            {% endif %}
+                        </a>
+                    </th>
+                </tr>
+                </thead>
+                <tbody id="top-table-body">
+                {% for t in tracks %}
+                    <tr class="top-row" data-track-id="{{ t.id }}">
+                        <td class="top-pos" data-label="#">{{ t.position }}</td>
+                        <td class="top-name-cell" data-label="Трек">
+                            <span class="top-name-text">{{ t.name }}</span>
+                            {% if is_admin %}
+                            <span class="top-row-actions">
+                                <button type="button"
+                                        class="top-action-btn top-action-rename"
+                                        title="Переименовать трек"
+                                        data-track-id="{{ t.id }}"
+                                        data-track-name="{{ t.name }}">
+                                    ✏️
+                                </button>
+                                <button type="button"
+                                        class="top-action-btn top-action-delete"
+                                        title="Удалить трек"
+                                        data-track-id="{{ t.id }}"
+                                        data-track-name="{{ t.name }}">
+                                    🗑
+                                </button>
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td data-label="Средний балл">
+                            <span class="top-score-chip score-chip">
+                                {% if t.avg_streamers is not none %}
+                                    {{ "%.2f"|format(t.avg_streamers) }}
+                                {% else %}
+                                    ?
+                                {% endif %}
+                            </span>
+                        </td>
+                        <td data-label="Средний балл зрителей">
+                            <span class="top-score-chip top-score-chip-viewer score-chip">
+                                {% if t.avg_viewers is not none %}
+                                    {{ "%.2f"|format(t.avg_viewers) }}
+                                {% else %}
+                                    ?
+                                {% endif %}
+                            </span>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        </div>
+
+        <div class="pagination-row">
+            {% if page > 1 %}
+                <a class="page-link" href="{{ url_for('top_tracks', page=page-1, sort_by=sort_by, direction=direction) }}">« Назад</a>
+            {% else %}
+                <span class="page-link page-link-disabled">« Назад</span>
+            {% endif %}
+
+            <span class="page-info">Страница {{ page }} из {{ total_pages }}</span>
+
+            {% if page < total_pages %}
+                <a class="page-link" href="{{ url_for('top_tracks', page=page+1, sort_by=sort_by, direction=direction) }}">Вперёд »</a>
+            {% else %}
+                <span class="page-link page-link-disabled">Вперёд »</span>
+            {% endif %}
+        </div>
+    </section>
+</div>
+
+
+<div class="modal-backdrop" id="track-modal-backdrop">
+    <div class="modal-card">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title">Информация по треку</div>
+                <div class="modal-subtitle" id="track-modal-subtitle">Трек: —</div>
+            </div>
+            <button type="button" class="modal-close-btn" id="track-modal-close">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="modal-columns">
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Средний балл по параметрам</h3>
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>Параметр</th>
+                                <th>Средний балл</th>
+                            </tr>
+                        </thead>
+                        <tbody id="track-modal-criteria-body"></tbody>
+                    </table>
+                </div>
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Средний балл зрителей по параметрам</h3>
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>Параметр</th>
+                                <th>Средний балл</th>
+                            </tr>
+                        </thead>
+                        <tbody id="track-modal-viewers-criteria-body"></tbody>
+                    </table>
+                    <div class="modal-overall">
+                        <div class="modal-overall-label">Итоговый средний балл зрителей:</div>
+                        <div class="modal-overall-row">
+                            <div class="modal-overall-value score-chip" id="track-modal-viewers-overall">?</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Оценщики</h3>
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>Оценщик</th>
+                                <th>Средний балл</th>
+                            </tr>
+                        </thead>
+                        <tbody id="track-modal-raters-body"></tbody>
+                    </table>
+                    <div class="modal-overall">
+                        <div class="modal-overall-label">Итоговый средний балл по треку:</div>
+                        <div class="modal-overall-row">
+                            <div class="modal-overall-value score-chip" id="track-modal-overall">0.00</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <a href="#" class="btn-secondary" id="track-modal-open-page" >
+                    Перейти на страницу трека
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

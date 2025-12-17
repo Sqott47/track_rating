@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Оценка треков · Зрители{% endblock %}
+
+{% block content %}
+<div class="page-content">
+    <section class="top-panel">
+        <div class="top-panel-main">
+            <div class="top-panel-label">Оцени трек</div>
+            <p class="top-panel-subtext">
+                Выбирай трек и тащи головастиков по шкале от 0 до 10.
+            </p>
+        </div>
+    </section>
+
+    
+    <section class="top-list-section">
+        <div class="top-table-card">
+            <div class="top-table-wrapper">
+            <div class="top-table-wrapper">
+            <table class="top-table">
+                <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Трек</th>
+                    <th>Добавлен</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for t in tracks %}
+                    <tr class="top-row viewer-track-row"
+                        data-track-id="{{ t.id }}">
+                        <td class="top-pos" data-label="#">{{ (page - 1) * 15 + loop.index }}</td>
+                        <td class="top-name-cell" data-label="Трек">{{ t.name }}</td>
+                        <td class="top-date-cell" data-label="Добавлен">
+                            {% if t.created_at %}
+                                {{ t.created_at.strftime("%d.%m.%Y %H:%M") }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        </div>
+        </div>
+
+        <div class="pagination-row">
+            {% if page > 1 %}
+                <a class="page-link" href="{{ url_for('viewers_page', page=page-1) }}">« Назад</a>
+            {% else %}
+                <span class="page-link page-link-disabled">« Назад</span>
+            {% endif %}
+
+            <span class="page-info">Страница {{ page }} из {{ total_pages }}</span>
+
+            {% if page < total_pages %}
+                <a class="page-link" href="{{ url_for('viewers_page', page=page+1) }}">Вперёд »</a>
+            {% else %}
+                <span class="page-link page-link-disabled">Вперёд »</span>
+            {% endif %}
+        </div>
+    </section>
+
+</div>
+
+<div class="modal-backdrop" id="viewer-modal-backdrop">
+    <div class="modal-card viewer-modal">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title" id="viewer-modal-title">Оценка трека</div>
+                <div class="modal-subtitle" id="viewer-modal-subtitle">Выберите оценки по параметрам</div>
+            </div>
+            <button type="button" class="modal-close-btn" id="viewer-modal-close">×</button>
+        </div>
+        <div class="modal-body">
+            
+            <div class="modal-columns">
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Твои оценки</h3>
+                    {% for key, label in CRITERIA %}
+                        <div class="slider-row viewer-slider-row">
+                            <div class="slider-label">{{ label }}</div>
+                            <div class="slider-control">
+                                <input type="range"
+                                       min="0" max="10" step="1" value="0"
+                                       class="viewer-slider"
+                                       data-criterion="{{ key }}">
+                                <div class="slider-value score-chip" data-criterion-value="{{ key }}">0</div>
+                            </div>
+                        </div>
+                    {% endfor %}
+
+                    <div class="modal-overall viewer-self-overall">
+                        <div class="modal-overall-label">Твой текущий общий балл:</div>
+                        <div class="modal-overall-row">
+                            <div class="modal-overall-value score-chip" id="viewer-self-overall">0.0</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Средний балл зрителей</h3>
+                    <div class="modal-overall">
+                        <div class="modal-overall-label">По версии чата:</div>
+                        <div class="modal-overall-row">
+                            <div class="modal-overall-value score-chip" id="viewer-modal-overall">0.00</div>
+                        </div>
+                    </div>
+                    <div class="viewer-message viewer-message--thanks" id="viewer-thanks" style="display:none;">
+                        Спасибо за оценку, GAZ!
+                    </div>
+                    <div class="viewer-message viewer-message--already" id="viewer-already" style="display:none;">
+                        Ты уже оценивал этот трек.
+                    </div>
+                </div>
+            </div>
+</div>
+
+            <div class="modal-footer">
+                <button class="btn-primary" id="viewer-submit-btn">Оценить трек</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/viewers.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block title %}ANTIGAZ · Company{% endblock %}
+
+{% block head_extra %}
+<style>
+.news-attachment-block {
+    margin-top: 8px;
+}
+.news-attachment-image {
+    display: block;
+    max-width: 100%;
+    border-radius: 12px;
+    margin-top: 4px;
+}
+.news-attachment-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    opacity: 0.9;
+}
+.news-attachment-link:hover {
+    opacity: 1;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-content home-page">
+    <section class="home-hero">
+        <div class="home-hero-main">
+            <div class="home-hero-kicker">ANTIGAZ COMPANY</div>
+            <h1 class="home-hero-title">ANTIGAZИЩЕ</h1>
+            <p class="home-hero-subtitle">
+                Стримы, внутренняя оценка треков, топы и история &mdash; всё в одном месте.
+            </p>
+            <div class="home-hero-tags">
+                <span class="hero-tag">🔥 Стримы</span>
+                <span class="hero-tag">🎧 Треки</span>
+                <span class="hero-tag">🧪 Объективная оценка</span>
+            </div>
+        </div>
+        <div class="home-hero-side">
+            <div class="home-hero-card">
+                <div class="home-hero-card-label">Статус</div>
+                <div class="home-hero-card-value">
+                    {% if stream_info %}
+                        <span class="live-dot"></span>
+                        <span>Онлайн: {{ stream_info.title }}</span>
+                    {% else %}
+                        <span class="live-dot live-dot-idle"></span>
+                        <span>Сейчас тихо, но это ненадолго.</span>
+                    {% endif %}
+                </div>
+                {% if stream_info and stream_info.url %}
+                    <a href="{{ stream_info.url }}" class="hero-link" target="_blank" rel="noopener">
+                        Перейти на стрим
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="home-layout">
+        <div class="home-main-column">
+            <section class="home-section">
+                <div class="home-section-header">
+                    <h2 class="home-section-title">Новости</h2>
+                    <p class="home-section-subtitle">
+                        Крупные апдейты, анонсы и внутренняя движуха ANTIGAZ.
+                    </p>
+                </div>
+                <div class="home-news-list">
+                    {% if news_items %}
+                        {% for n in news_items %}
+                            <article class="news-card">
+                                <div class="news-meta">
+                                    {% if n.tag %}
+                                        <span class="news-tag">{{ n.tag }}</span>
+                                    {% endif %}
+                                    {% if n.date %}
+                                        <span class="news-date">{{ n.date }}</span>
+                                    {% endif %}
+                                </div>
+                                <h3 class="news-title">{{ n.title }}</h3>
+                                {% if n.text %}
+                                    <p class="news-text">{{ n.text|safe }}</p>
+                                {% endif %}
+
+                                {% if n.attachment %}
+                                    <div class="news-attachment-block">
+                                        {% if n.attachment_is_image %}
+                                            <a href="{{ url_for('static', filename='uploads/' ~ n.attachment) }}" target="_blank" rel="noopener">
+                                                <img src="{{ url_for('static', filename='uploads/' ~ n.attachment) }}"
+                                                     alt="Вложение к новости"
+                                                     class="news-attachment-image">
+                                            </a>
+                                        {% else %}
+                                            <a href="{{ url_for('static', filename='uploads/' ~ n.attachment) }}"
+                                               target="_blank"
+                                               rel="noopener"
+                                               class="news-attachment-link">
+                                                📎 Вложение к новости
+                                            </a>
+                                        {% endif %}
+                                    </div>
+                                {% endif %}
+                            </article>
+                        {% endfor %}
+                    {% else %}
+                        <p class="home-empty">Здесь пока нет новостей, но это временно.</p>
+                    {% endif %}
+                
+            {% if news_pagination and news_pagination.pages > 1 %}
+            <div class="home-pagination">
+                {% if news_pagination.has_prev %}
+                    <a class="pager-link" href="{{ url_for('home', page=news_pagination.prev_num) }}">&larr; Предыдущие</a>
+                {% endif %}
+                <span class="pager-info">
+                    Страница {{ news_pagination.page }} из {{ news_pagination.pages }}
+                </span>
+                {% if news_pagination.has_next %}
+                    <a class="pager-link" href="{{ url_for('home', page=news_pagination.next_num) }}">Следующие &rarr;</a>
+                {% endif %}
+            </div>
+            {% endif %}
+</div>
+            </section>
+        </div>
+
+        <aside class="home-sidebar">
+            <section class="home-section home-widget">
+                <div class="home-section-header">
+                    <h2 class="home-section-title">Мини‑топ треков</h2>
+                    <p class="home-section-subtitle">Топ‑3 по внутреннему рейтингу стримеров.</p>
+                </div>
+                {% if top_tracks %}
+                    <ol class="mini-top-list">
+                        {% for t in top_tracks %}
+                            <li class="mini-top-item">
+                                <button type="button"
+                                        class="mini-top-button"
+                                        onclick="openTrackDetailsModal({{ t.id }})">
+                                    <span class="mini-top-pos">#{{ loop.index }}</span>
+                                    <span class="mini-top-name">{{ t.name }}</span>
+                                    {% if t.avg_score is defined and t.avg_score is not none %}
+                                        <span class="top-score-chip score-chip mini-top-score">
+                                            {{ '%.2f'|format(t.avg_score) }}
+                                        </span>
+                                    {% endif %}
+                                </button>
+                            </li>
+                        {% endfor %}
+                    </ol>
+                    <a href="{{ url_for('top_tracks') }}" class="hero-link secondary-link">
+                        Перейти к полному топу
+                    </a>
+                {% else %}
+                    <p class="home-empty">Топ пока пуст &mdash; нужно кому‑то уже начинать ставить оценки.</p>
+                {% endif %}
+            </section>
+
+            <section class="home-section home-widget">
+                <div class="home-section-header">
+                    <h2 class="home-section-title">Недавно оценённые</h2>
+                    <p class="home-section-subtitle">Последние треки, которые прошли через оценку.</p>
+                </div>
+                {% if recent_tracks %}
+                    <ul class="history-list">
+                        {% for t in recent_tracks %}
+                            <li class="history-item">
+                                <button type="button"
+                                        class="history-button"
+                                        onclick="openTrackDetailsModal({{ t.id }})">
+                                    <div class="history-main">
+                                        <span class="history-name">{{ t.name }}</span>
+                                        {% if t.final_score is defined and t.final_score is not none %}
+                                            <span class="top-score-chip score-chip history-score">
+                                                {{ '%.2f'|format(t.final_score) }}
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                    {% if t.created_at %}
+                                        <div class="history-meta">
+                                            <span class="history-date">{{ t.created_at.strftime('%d.%m.%Y') }}</span>
+                                        </div>
+                                    {% endif %}
+                                </button>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="home-empty">Недавно ничего не оценивали, самое время это исправить.</p>
+                {% endif %}
+            </section>
+        </aside>
+    </section>
+</div>
+
+{# Модалка с деталями по треку такая же, как на странице топа #}
+<div class="modal-backdrop" id="track-modal-backdrop">
+    <div class="modal-card">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title">Информация по треку</div>
+                <div class="modal-subtitle" id="track-modal-subtitle">Трек: —</div>
+            </div>
+            <button type="button" class="modal-close-btn" id="track-modal-close">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="modal-columns">
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Средний балл по параметрам</h3>
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>Параметр</th>
+                                <th>Средний балл</th>
+                            </tr>
+                        </thead>
+                        <tbody id="track-modal-criteria-body"></tbody>
+                    </table>
+                </div>
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Средний балл зрителей по параметрам</h3>
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>Параметр</th>
+                                <th>Средний балл</th>
+                            </tr>
+                        </thead>
+                        <tbody id="track-modal-viewers-criteria-body"></tbody>
+                    </table>
+                    <div class="modal-overall">
+                        <div class="modal-overall-label">Итоговый средний балл зрителей:</div>
+                        <div class="modal-overall-row">
+                            <div class="modal-overall-value score-chip" id="track-modal-viewers-overall">?</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Оценщики</h3>
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>Оценщик</th>
+                                <th>Средний балл</th>
+                            </tr>
+                        </thead>
+                        <tbody id="track-modal-raters-body"></tbody>
+                    </table>
+                    <div class="modal-overall">
+                        <div class="modal-overall-label">Итоговый средний балл по треку:</div>
+                        <div class="modal-overall-row">
+                            <div class="modal-overall-value score-chip" id="track-modal-overall">0.00</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <a href="#" class="btn-secondary" id="track-modal-open-page">
+                    Перейти на страницу трека
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.news-attachment-block {
+    margin-top: 8px;
+}
+.news-attachment-image {
+    display: block;
+    max-width: 100%;
+    border-radius: 12px;
+    margin-top: 4px;
+}
+.news-attachment-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    opacity: 0.9;
+}
+.news-attachment-link:hover {
+    opacity: 1;
+}
+</style>
+
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Вход · Оценка треков{% endblock %}
+
+{% block content %}
+<div class="center-page">
+    <section class="auth-card">
+        <h1 class="auth-title">Вход</h1>
+        <p class="auth-subtitle">Только админ может управлять панелью оценки</p>
+
+        <form method="post" class="auth-form">
+            <label class="auth-field">
+                <span>Логин</span>
+                <input type="text" name="username" autocomplete="username" required>
+            </label>
+            <label class="auth-field">
+                <span>Парроль</span>
+                <input type="password" name="password" autocomplete="current-password" required>
+            </label>
+            <button type="submit" class="btn-primary auth-btn">Войти</button>
+            <div class="auth-hint">
+                Без правильного логина и пароля доступ к слайдерам закрыт.
+            </div>
+        </form>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% endblock %}
