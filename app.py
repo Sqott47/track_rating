@@ -4,6 +4,9 @@ from datetime import datetime
 from uuid import uuid4
 import io
 import qrcode
+import subprocess
+import shutil
+from typing import Optional, Dict, Any, List
 
 from flask import (
     Flask,
@@ -13,13 +16,16 @@ from flask import (
     url_for,
     session,
     flash,
+    abort,
     jsonify,
     make_response,
+    send_from_directory,
 )
 from werkzeug.utils import secure_filename
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit
 from sqlalchemy import func, text
+
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -29,9 +35,73 @@ UPLOAD_DIR = os.getenv(
 )
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# -------------------------
+# Track submissions (queue)
+# -------------------------
+# Храним исходники и сконверченные mp3 в подпапках UPLOAD_DIR.
+# В проде UPLOAD_DIR обычно указывает на shared/, поэтому всё окажется в shared.
+SUBMISSIONS_RAW_DIR = os.path.join(UPLOAD_DIR, "submissions_raw")
+os.makedirs(SUBMISSIONS_RAW_DIR, exist_ok=True)
+# SUBMISSIONS_MP3_DIR ранее использовался для перекодирования.
+# Сейчас конвертацию отключаем полностью: храним исходники как есть (mp3/wav)
+
+SUBMISSION_MAX_MB = int(os.getenv("SUBMISSION_MAX_MB", "50"))
+ALLOWED_SUBMISSION_EXTS = {"mp3", "wav"}
+# -------------------------
+# Optional S3 storage (Timeweb S3 / S3-compatible)
+# Works on server with env vars, and does nothing locally on Windows by default.
+# -------------------------
+S3_ENABLED = os.getenv("S3_ENABLED", "0") == "1"
+S3_ENDPOINT_URL = (os.getenv("S3_ENDPOINT_URL") or "").strip()
+S3_BUCKET = (os.getenv("S3_BUCKET") or "").strip()
+S3_REGION = (os.getenv("S3_REGION") or "").strip()
+S3_PREFIX = (os.getenv("S3_PREFIX") or "submissions_raw/").strip()
+S3_PRESIGN_EXPIRES = int(os.getenv("S3_PRESIGN_EXPIRES", "1800"))
+S3_KEEP_LOCAL = os.getenv("S3_KEEP_LOCAL", "0") == "1"  # optional fallback
+
+_s3_client = None
+
+def _s3_is_configured() -> bool:
+    return bool(S3_ENABLED and S3_BUCKET and S3_ENDPOINT_URL)
+
+def _s3_key_for_submission(file_uuid: str, ext: str) -> str:
+    ext = (ext or "").lower().lstrip(".")
+    prefix = S3_PREFIX or ""
+    if prefix and not prefix.endswith("/"):
+        prefix += "/"
+    return f"{prefix}{file_uuid}.{ext}"
+
+def _get_s3_client():
+    """
+    Lazy import boto3 so local dev works without boto3 installed.
+    """
+    global _s3_client
+    if not _s3_is_configured():
+        return None
+    if _s3_client is not None:
+        return _s3_client
+
+    try:
+        import boto3
+        from botocore.config import Config
+    except Exception as e:
+        print("S3 enabled but boto3/botocore not available:", e)
+        return None
+
+    cfg = Config(signature_version="s3v4")
+    _s3_client = boto3.client(
+        "s3",
+        region_name=S3_REGION or None,
+        endpoint_url=S3_ENDPOINT_URL,
+        config=cfg,
+    )
+    return _s3_client
+
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change_this_secret_key")
+# Limit upload size (50MB by default). Nginx must also allow this via client_max_body_size.
+app.config["MAX_CONTENT_LENGTH"] = SUBMISSION_MAX_MB * 1024 * 1024
 DB_PATH = os.getenv(
     "DB_PATH",
     os.path.join(BASE_DIR, "track_ratings.db"),
@@ -39,6 +109,15 @@ DB_PATH = os.getenv(
 
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# SQLite по умолчанию ограничивает доступ к соединению из одного потока.
+# Мы используем фоновые задачи (конвертация аудио), поэтому явно разрешаем
+# межпоточный доступ для sqlite.
+if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite:"):
+    app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {})
+    engine_opts = app.config["SQLALCHEMY_ENGINE_OPTIONS"]
+    engine_opts.setdefault("connect_args", {})
+    engine_opts["connect_args"].setdefault("check_same_thread", False)
 
 db = SQLAlchemy(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -93,12 +172,44 @@ class StreamConfig(db.Model):
     widget_token = db.Column(db.String(64), nullable=True)
 
 
+class TrackSubmission(db.Model):
+    """Публичная очередь треков от зрителей.
+
+    Зритель загружает файл (wav/mp3), на сервере конвертируем в mp3.
+    Админ выставляет приоритет (0/100/200/300/400) и выбирает активный трек.
+    """
+
+    __tablename__ = "track_submissions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    artist = db.Column(db.String(255), nullable=False)
+    title = db.Column(db.String(255), nullable=False)
+    priority = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(
+        db.String(32),
+        nullable=False,
+        default="converting",  # converting|queued|playing|done|deleted|failed
+    )
+    file_uuid = db.Column(db.String(32), nullable=False, unique=True, index=True)
+    original_filename = db.Column(db.String(255), nullable=True)
+    original_ext = db.Column(db.String(16), nullable=False)
+    duration_sec = db.Column(db.Integer, nullable=True)
+    linked_track_id = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    # Время, когда текущий priority был установлен. Нужен как стабильный tie-breaker
+    # для FIFO внутри одного уровня приоритета (чтобы более ранний 200 не мог быть
+    # перебит более поздним 200).
+    priority_set_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
 class Track(db.Model):
     __tablename__ = "tracks"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_deleted = db.Column(db.Boolean, nullable=False, default=False)
+    # Если трек пришёл из очереди (загрузка зрителем) — ссылка на submission.
+    submission_id = db.Column(db.Integer, db.ForeignKey("track_submissions.id"), nullable=True)
 
 
 class Evaluation(db.Model):
@@ -173,6 +284,16 @@ with app.app_context():
         # Do not crash app if migration fails; just log
         print("Warning: could not ensure is_deleted column:", e)
 
+    # Ensure submission_id exists on tracks (link to queue submissions)
+    try:
+        rows = db.session.execute(text("PRAGMA table_info(tracks)")).fetchall()
+        cols = [r[1] for r in rows]
+        if "submission_id" not in cols:
+            db.session.execute(text("ALTER TABLE tracks ADD COLUMN submission_id INTEGER"))
+            db.session.commit()
+    except Exception as e:
+        print("Warning: could not ensure submission_id column:", e)
+
     # Ensure widget_token exists on stream_config
     try:
         rows = db.session.execute(text("PRAGMA table_info(stream_config)")).fetchall()
@@ -184,6 +305,18 @@ with app.app_context():
             db.session.commit()
     except Exception as e:
         print("Warning: could not ensure widget_token column:", e)
+
+    # Ensure priority_set_at exists on track_submissions (stable FIFO within same priority)
+    try:
+        rows = db.session.execute(text("PRAGMA table_info(track_submissions)")).fetchall()
+        cols = [r[1] for r in rows]
+        if "priority_set_at" not in cols:
+            # SQLite will store DateTime as TEXT; we keep it nullable during migration and then backfill.
+            db.session.execute(text("ALTER TABLE track_submissions ADD COLUMN priority_set_at DATETIME"))
+            db.session.execute(text("UPDATE track_submissions SET priority_set_at = created_at WHERE priority_set_at IS NULL"))
+            db.session.commit()
+    except Exception as e:
+        print("Warning: could not ensure priority_set_at column:", e)
 
 
     # инициализация супер-админа, если пользователей ещё нет
@@ -206,6 +339,14 @@ _next_rater_id = 1
 shared_state = {
     "track_name": "",
     "raters": {},  # rater_id -> {id, name, order, scores{criterion_key: value}}
+    # Активный трек из очереди (track_submissions.id). None если трек задан вручную.
+    "active_submission_id": None,
+    # Состояние синхро-плеера.
+    "playback": {
+        "is_playing": False,
+        "position_ms": 0,
+        "server_ts_ms": 0,
+    },
 }
 
 
@@ -267,6 +408,136 @@ def _serialize_state():
         }
 
 
+def _now_ms() -> int:
+    return int(datetime.utcnow().timestamp() * 1000)
+
+
+def _submission_display_name(sub: TrackSubmission) -> str:
+    artist = (sub.artist or "").strip()
+    title = (sub.title or "").strip()
+    if artist and title:
+        return f"{artist} — {title}"
+    return title or artist or "Без названия"
+
+def _get_submission_audio_url(file_uuid: str, ext: str) -> str:
+    ext = (ext or "").lower().lstrip(".")
+    return url_for("submission_audio", file_uuid=file_uuid, ext=ext, _external=False)
+
+
+def _compute_playback_position_ms(pb: Dict[str, Any], now_ms: Optional[int] = None) -> int:
+    """Текущая позиция плеера по состоянию сервера."""
+    if now_ms is None:
+        now_ms = _now_ms()
+    base = int(pb.get("position_ms") or 0)
+    if pb.get("is_playing"):
+        started_at = int(pb.get("server_ts_ms") or now_ms)
+        base += max(0, now_ms - started_at)
+    return max(0, base)
+
+
+def _get_playback_snapshot() -> Dict[str, Any]:
+    """Снимок состояния синхро‑плеера + активный трек."""
+    with state_lock:
+        active_id = shared_state.get("active_submission_id")
+        pb = dict(shared_state.get("playback") or {})
+
+    now_ms = _now_ms()
+    pos_ms = _compute_playback_position_ms(pb, now_ms=now_ms)
+
+    active_payload = None
+    if active_id:
+        sub = db.session.get(TrackSubmission, int(active_id))
+        if sub and sub.status not in ("deleted", "failed"):
+            active_payload = {
+                "id": sub.id,
+                "artist": sub.artist,
+                "title": sub.title,
+                "display_name": _submission_display_name(sub),
+                "priority": int(sub.priority or 0),
+                "status": sub.status,
+                "duration_sec": int(sub.duration_sec) if sub.duration_sec is not None else None,
+                "file_uuid": sub.file_uuid,
+                "audio_url": _get_submission_audio_url(sub.file_uuid, sub.original_ext),
+            }
+
+    return {
+        "active": active_payload,
+        "playback": {
+            "is_playing": bool(pb.get("is_playing")),
+            "position_ms": pos_ms,
+        },
+    }
+
+
+def _serialize_queue_state(limit: int = 50) -> Dict[str, Any]:
+    """Сериализация очереди для панели/публичной страницы."""
+    items = (
+        db.session.query(TrackSubmission)
+        .filter(TrackSubmission.status == "queued")
+        .order_by(
+            TrackSubmission.priority.desc(),
+            TrackSubmission.priority_set_at.asc(),
+            TrackSubmission.created_at.asc(),
+            TrackSubmission.id.asc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+    queued_pos = 0
+    out_items: List[Dict[str, Any]] = []
+    for s in items:
+        pos = None
+        if s.status == "queued":
+            queued_pos += 1
+            pos = queued_pos
+        out_items.append(
+            {
+                "id": s.id,
+                "artist": s.artist,
+                "title": s.title,
+                "display_name": _submission_display_name(s),
+                "priority": int(s.priority or 0),
+                "status": s.status,
+                "duration_sec": int(s.duration_sec) if s.duration_sec is not None else None,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+                "queue_position": pos,
+            }
+        )
+
+    counts = {
+
+        "queued": db.session.query(func.count(TrackSubmission.id)).filter(TrackSubmission.status == "queued").scalar() or 0,
+
+    }
+    return {"items": out_items, "counts": counts}
+
+
+def _broadcast_queue_state() -> None:
+    try:
+        payload = _serialize_queue_state(limit=100)
+        socketio.emit("queue_state", payload)
+    except Exception as e:
+        print("Warning: failed to broadcast queue_state:", e)
+
+
+def _broadcast_playback_state() -> None:
+    try:
+        payload = _get_playback_snapshot()
+        socketio.emit("playback_state", payload)
+    except Exception as e:
+        print("Warning: failed to broadcast playback_state:", e)
+
+
+def _convert_submission_worker(submission_id: int) -> None:
+    """Конвертация временно отключена.
+
+    Исторически очередь поддерживала перекодирование wav -> mp3, но это
+    создавало блокировки/залипания в реальном времени. Сейчас храним
+    исходники как есть (mp3/wav) и ничего не конвертируем.
+    """
+    return
+
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -300,6 +571,176 @@ def logout():
     session.pop("user", None)
     session.pop("role", None)
     return redirect(url_for("login"))
+
+
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    """Единый обработчик для слишком больших загрузок."""
+    flash(f"Файл слишком большой. Максимум {SUBMISSION_MAX_MB} МБ.", "error")
+    # если загрузка шла через очередь — возвращаем туда
+    try:
+        if request.path.startswith("/queue"):
+            return redirect(url_for("queue_page"))
+    except Exception:
+        pass
+    return redirect(url_for("home"))
+
+
+def _is_safe_uuid(value: str) -> bool:
+    if not value:
+        return False
+    if len(value) > 64:
+        return False
+    # uuid4().hex — только [0-9a-f]
+    for ch in value:
+        if ch not in "0123456789abcdef":
+            return False
+    return True
+
+
+@app.route("/media/submissions/<string:file_uuid>.<string:ext>")
+def submission_audio(file_uuid: str, ext: str):
+    """Публичная раздача загруженных аудиофайлов (mp3/wav) с поддержкой Range."""
+    if not _is_safe_uuid(file_uuid):
+        return make_response("Not found", 404)
+
+    ext = (ext or "").lower().lstrip(".")
+    if ext not in ALLOWED_SUBMISSION_EXTS:
+        return make_response("Not found", 404)
+    # If S3 is configured, redirect to a short-lived presigned URL
+    s3 = _get_s3_client()
+    if s3 and _s3_is_configured():
+        try:
+            key = _s3_key_for_submission(file_uuid, ext)
+            url = s3.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={"Bucket": S3_BUCKET, "Key": key},
+                ExpiresIn=S3_PRESIGN_EXPIRES,
+            )
+            return redirect(url, code=302)
+        except Exception as e:
+            print("S3 presign error (fallback to local):", e)
+            # fallback to local disk below
+
+    filename = f"{file_uuid}.{ext}"
+    file_path = os.path.join(SUBMISSIONS_RAW_DIR, filename)
+    if not os.path.isfile(file_path):
+        return make_response("Not found", 404)
+
+    resp = send_from_directory(SUBMISSIONS_RAW_DIR, filename, conditional=True)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@app.route("/queue", methods=["GET"])
+def queue_page():
+    """Публичная очередь треков + форма загрузки."""
+    # активный трек для отображения (если есть)
+    active = _get_playback_snapshot().get("active")
+    queue = _serialize_queue_state(limit=200)
+    return render_template(
+        "queue.html",
+        queue_items=queue.get("items") or [],
+        queue_counts=queue.get("counts") or {},
+        active_track=active,
+        max_mb=SUBMISSION_MAX_MB,
+        allowed_exts=sorted(ALLOWED_SUBMISSION_EXTS),
+    )
+
+
+@app.route("/queue/submit", methods=["POST"])
+def queue_submit():
+    """Принять трек в очередь (публично)."""
+    artist = (request.form.get("artist") or "").strip()
+    title = (request.form.get("title") or "").strip()
+    file = request.files.get("file")
+
+    if not artist and not title:
+        flash("Укажи хотя бы исполнителя или название трека.", "error")
+        return redirect(url_for("queue_page"))
+
+    if not file or not file.filename:
+        flash("Прикрепи аудиофайл (.mp3 или .wav).", "error")
+        return redirect(url_for("queue_page"))
+
+    # Важно: secure_filename() может "съесть" кириллицу полностью.
+    # Расширение берём из исходного имени, а на диск сохраняем под uuid.
+    incoming_name = file.filename
+    dot_ext = os.path.splitext(incoming_name)[1].lower()
+    ext = dot_ext.lstrip(".")
+    if ext not in ALLOWED_SUBMISSION_EXTS:
+        flash("Неподдерживаемый формат. Разрешены: " + ", ".join(sorted(ALLOWED_SUBMISSION_EXTS)), "error")
+        return redirect(url_for("queue_page"))
+
+    file_uuid = uuid4().hex
+    raw_filename = f"{file_uuid}.{ext}"
+    raw_path = os.path.join(SUBMISSIONS_RAW_DIR, raw_filename)
+
+    # Конвертацию отключаем: сразу считаем трек готовым.
+    sub = TrackSubmission(
+        artist=artist or "",
+        title=title or "",
+        priority=0,
+        status="queued",
+        file_uuid=file_uuid,
+        original_filename=incoming_name,
+        original_ext=ext,
+        created_at=datetime.utcnow(),
+        priority_set_at=datetime.utcnow(),
+    )
+    db.session.add(sub)
+    db.session.commit()
+
+    try:
+        # 1) S3 (if configured)
+        s3 = _get_s3_client()
+        if s3 and _s3_is_configured():
+            key = _s3_key_for_submission(file_uuid, ext)
+
+            # rewind stream (important)
+            try:
+                file.stream.seek(0)
+            except Exception:
+                pass
+
+            content_type = "audio/mpeg" if ext == "mp3" else "audio/wav"
+            s3.upload_fileobj(
+                Fileobj=file.stream,
+                Bucket=S3_BUCKET,
+                Key=key,
+                ExtraArgs={"ContentType": content_type},
+            )
+
+            # 2) Optional local fallback copy
+            if S3_KEEP_LOCAL:
+                try:
+                    file.stream.seek(0)
+                except Exception:
+                    pass
+                file.save(raw_path)
+
+        else:
+            # Local dev / no S3
+            file.save(raw_path)
+
+    except Exception as e:
+        print("Failed to save submission file:", e)
+        sub.status = "failed"
+        db.session.commit()
+        flash("Не удалось сохранить файл. Попробуй ещё раз.", "error")
+        return redirect(url_for("queue_page"))
+
+    _broadcast_queue_state()
+    flash("Трек добавлен в очередь.", "success")
+    return redirect(url_for("queue_page"))
+
+
+@app.route("/api/queue")
+def api_queue_state():
+    """JSON для очереди (можно использовать на фронте, в т.ч. для панели)."""
+    payload = _serialize_queue_state(limit=200)
+    payload["active"] = _get_playback_snapshot().get("active")
+    return jsonify(payload)
 
 
 
@@ -466,20 +907,18 @@ def index():
         return redirect(url_for("login"))
     _init_default_raters()
     initial_state = _serialize_state()
-    return render_template("index.html", initial_state=initial_state)
-
-
-
-
-
-
+    return render_template(
+        "index.html",
+        initial_state=initial_state,
+        is_admin=_require_admin(),
+    )
 
 @app.route("/admin/news/<int:news_id>/delete", methods=["POST"])
 def delete_news(news_id):
     if not _require_admin():
         return redirect(url_for("login"))
 
-    news = db.session.query(News).get(news_id)
+    news = db.session.get(News, news_id)
     if not news:
         flash("Новость не найдена", "error")
         return redirect(url_for("admin"))
@@ -536,7 +975,7 @@ def admin():
                     flash("Не указан пользователь для удаления", "error")
                     return redirect(url_for("admin", tab="users"))
 
-                user = db.session.query(User).get(user_id)
+                user = db.session.get(User, user_id)
                 if not user:
                     flash("Пользователь не найден", "error")
                     return redirect(url_for("admin", tab="users"))
@@ -564,7 +1003,7 @@ def admin():
                 flash("Не указан комментарий", "error")
                 return redirect(url_for("admin", tab="comments"))
 
-            comment = db.session.query(TrackComment).get(comment_id)
+            comment = db.session.get(TrackComment, comment_id)
             if not comment or comment.is_deleted:
                 flash("Комментарий не найден", "error")
                 return redirect(url_for("admin", tab="comments"))
@@ -735,9 +1174,49 @@ def _get_track_url(track_id: int) -> str:
     return url_for("track_page", track_id=track_id, _external=True)
 
 
+
+
+# -------------------------
+# Admin actions
+# -------------------------
+@app.route("/admin/clear_queue", methods=["POST"])
+@app.route("/admin/clear_queue", methods=["POST"])
+def admin_clear_queue():
+    # Проверка прав — В ТВОЁМ стиле
+    if not _require_admin():
+        return redirect(url_for("login"))
+
+    # Обязательное подтверждение
+    if (request.form.get("confirm") or "").strip() != "yes":
+        flash("Очистка очереди отменена.", "warning")
+        return redirect(url_for("index"))
+
+    # Мягкая очистка: только queued → deleted
+    cleared = (
+        db.session.query(TrackSubmission)
+        .filter(TrackSubmission.status == "queued")
+        .update(
+            {TrackSubmission.status: "deleted"},
+            synchronize_session=False
+        )
+    )
+    db.session.commit()
+
+    flash(f"Очередь очищена: {cleared} трек(ов).", "success")
+
+    # ВАЖНО: сразу обновляем всем очередь
+    try:
+        _broadcast_queue_state()
+    except Exception:
+        pass
+
+    return redirect(url_for("index"))
+
+
+
 @app.route("/qr/track/<int:track_id>.png")
 def qr_for_track(track_id: int):
-    track = db.session.query(Track).get(track_id)
+    track = db.session.get(Track, track_id)
     if not track or getattr(track, "is_deleted", False):
         return make_response("Track not found", 404)
 
@@ -775,7 +1254,7 @@ def track_page(track_id: int):
     - список оценщиков
     - комментарии (с модерацией в админке)
     """
-    track = Track.query.get(track_id)
+    track = db.session.get(Track, track_id)
     if (not track) or getattr(track, "is_deleted", False):
         flash("Трек не найден", "error")
         return redirect(url_for("top_tracks"))
@@ -789,7 +1268,7 @@ def track_page(track_id: int):
             if not user or not user.is_admin():
                 flash("Недостаточно прав для удаления комментария", "error")
             else:
-                comment_obj = db.session.query(TrackComment).get(delete_id)
+                comment_obj = db.session.get(TrackComment, delete_id)
                 if comment_obj and not comment_obj.is_deleted:
                     comment_obj.is_deleted = True
                     db.session.commit()
@@ -895,18 +1374,48 @@ def track_page(track_id: int):
     user = get_current_user()
     is_admin = bool(user and user.is_admin())
 
+    # если трек связан с файлом из очереди — покажем плеер
+    audio_url = None
+    try:
+        if getattr(track, "submission_id", None):
+            sub = db.session.get(TrackSubmission, int(track.submission_id))
+            if sub and sub.status not in ("deleted", "failed"):
+                ext = (sub.original_ext or "").lower().lstrip(".")
+                if ext in ALLOWED_SUBMISSION_EXTS:
+                    audio_url = url_for("submission_audio", file_uuid=sub.file_uuid, ext=ext)
+    except Exception:
+        audio_url = None
+
+    
+    # Player meta for embedded (track page) audio player
+    player_title = None
+    player_subtitle = None
+    try:
+        if getattr(track, "submission_id", None):
+            sub = db.session.get(TrackSubmission, track.submission_id)
+            if sub:
+                player_title = sub.title
+                player_subtitle = sub.artist
+    except Exception:
+        pass
+    if not player_title:
+        player_title = getattr(track, "name", "Прослушивание")
+
     return render_template(
-        "track.html",
-        track=track,
-        overall_avg=overall_avg,
-        criteria_stats=criteria_stats,
-        raters_stats=raters_stats,
-        viewer_overall=viewer_overall,
-        viewer_criteria_stats=viewer_criteria_stats,
-        comments=comments,
-        CRITERIA=CRITERIA,
-        is_admin=is_admin,
-    )
+            "track.html",
+            track=track,
+            audio_url=audio_url,
+            player_title=player_title,
+            player_subtitle=player_subtitle,
+            overall_avg=overall_avg,
+            criteria_stats=criteria_stats,
+            raters_stats=raters_stats,
+            viewer_overall=viewer_overall,
+            viewer_criteria_stats=viewer_criteria_stats,
+            comments=comments,
+            CRITERIA=CRITERIA,
+            is_admin=is_admin,
+        )
 
 
 @app.route("/top")
@@ -1013,7 +1522,7 @@ def admin_rename_track(track_id: int):
     if not new_name:
         return jsonify({"error": "empty_name"}), 400
 
-    track = Track.query.get(track_id)
+    track = db.session.get(Track, track_id)
     if (not track) or getattr(track, "is_deleted", False):
         return jsonify({"error": "not_found"}), 404
 
@@ -1027,7 +1536,7 @@ def admin_delete_track(track_id: int):
     if not _require_admin():
         return jsonify({"error": "forbidden"}), 403
 
-    track = Track.query.get(track_id)
+    track = db.session.get(Track, track_id)
     if (not track) or getattr(track, "is_deleted", False):
         return jsonify({"error": "not_found"}), 404
 
@@ -1093,7 +1602,7 @@ def viewer_track_summary(track_id: int):
     - средние оценки зрителей по критериям
     - общая средняя зрителей
     """
-    track = Track.query.get(track_id)
+    track = db.session.get(Track, track_id)
     if (not track) or getattr(track, "is_deleted", False):
         return jsonify({"error": "not_found"}), 404
 
@@ -1172,7 +1681,7 @@ def viewers_rate():
     if not isinstance(track_id, int):
         return jsonify({"error": "bad_track_id"}), 400
 
-    track = Track.query.get(track_id)
+    track = db.session.get(Track, track_id)
     if not track:
         return jsonify({"error": "track_not_found"}), 404
 
@@ -1236,7 +1745,7 @@ def track_summary(track_id: int):
     - средняя по критериям (зрители)
     - общая средняя зрителей
     """
-    track = Track.query.get(track_id)
+    track = db.session.get(Track, track_id)
     if (not track) or getattr(track, "is_deleted", False):
         return jsonify({"error": "not_found"}), 404
 
@@ -1325,6 +1834,196 @@ def handle_initial_state():
     emit("initial_state", _serialize_state())
 
 
+@socketio.on("request_queue_state")
+def handle_request_queue_state():
+    """Состояние очереди и плеера для панели."""
+    if not _require_panel_access():
+        return
+    emit("queue_state", _serialize_queue_state(limit=100))
+    emit("playback_state", _get_playback_snapshot())
+
+
+@socketio.on("admin_set_submission_priority")
+def handle_admin_set_submission_priority(data):
+    if not _require_admin():
+        return
+    sid = (data or {}).get("submission_id")
+    pr = (data or {}).get("priority")
+    try:
+        sid = int(sid)
+        pr = int(pr)
+    except Exception:
+        return
+
+    sub = db.session.get(TrackSubmission, sid)
+    if not sub or sub.status in ("deleted", "done"):
+        return
+
+    # Обновляем priority_set_at только если приоритет реально изменился.
+    # Это гарантирует FIFO внутри одного уровня приоритета: более ранний 200
+    # не будет перебит более поздним 200.
+    if int(sub.priority or 0) != pr:
+        sub.priority = pr
+        sub.priority_set_at = datetime.utcnow()
+    db.session.commit()
+    _broadcast_queue_state()
+
+
+@socketio.on("admin_delete_submission")
+def handle_admin_delete_submission(data):
+    if not _require_admin():
+        return
+    sid = (data or {}).get("submission_id")
+    try:
+        sid = int(sid)
+    except Exception:
+        return
+
+    sub = db.session.get(TrackSubmission, sid)
+    if not sub:
+        return
+
+    # если удаляем активный трек — остановим плеер и очистим состояние
+    try:
+        with state_lock:
+            if shared_state.get("active_submission_id") == sid:
+                shared_state["active_submission_id"] = None
+                shared_state["playback"] = {
+                    "is_playing": False,
+                    "position_ms": 0,
+                    "server_ts_ms": _now_ms(),
+                }
+                shared_state["track_name"] = ""
+        emit("track_name_changed", {"track_name": ""})
+    except Exception:
+        pass
+
+    sub.status = "deleted"
+    db.session.commit()
+
+    # удалить файл с диска (конвертацию отключили, поэтому удаляем только исходник)
+    try:
+        ext = (sub.original_ext or "").lower().lstrip(".")
+        raw_path = os.path.join(SUBMISSIONS_RAW_DIR, f"{sub.file_uuid}.{ext}")
+        if os.path.exists(raw_path):
+            os.remove(raw_path)
+    except Exception:
+        pass
+
+    _broadcast_playback_state()
+    _broadcast_queue_state()
+
+
+@socketio.on("admin_activate_submission")
+def handle_admin_activate_submission(data):
+    """Сделать трек активным и (опционально) стартануть проигрывание."""
+    if not _require_admin():
+        return
+
+    sid = (data or {}).get("submission_id")
+    autoplay = bool((data or {}).get("autoplay", True))
+    try:
+        sid = int(sid)
+    except Exception:
+        return
+
+    sub = db.session.get(TrackSubmission, sid)
+    if not sub:
+        return
+    if sub.status in ("deleted", "failed", "converting"):
+        return
+
+    # снимем флаг playing с предыдущего (если он не оценён)
+    try:
+        prev_playing = (
+            db.session.query(TrackSubmission)
+            .filter(TrackSubmission.status == "playing")
+            .all()
+        )
+        for p in prev_playing:
+            if p.id != sub.id:
+                if p.linked_track_id:
+                    p.status = "done"
+                else:
+                    p.status = "queued"
+        sub.status = "playing"
+        db.session.commit()
+    except Exception:
+        pass
+
+    track_name = _submission_display_name(sub)
+    with state_lock:
+        shared_state["track_name"] = track_name
+        shared_state["active_submission_id"] = sub.id
+        shared_state["playback"] = {
+            "is_playing": bool(autoplay),
+            "position_ms": 0,
+            "server_ts_ms": _now_ms(),
+        }
+
+    emit("track_name_changed", {"track_name": track_name})
+    _broadcast_playback_state()
+    _broadcast_queue_state()
+
+
+@socketio.on("admin_playback_cmd")
+def handle_admin_playback_cmd(data):
+    """Команды управления синхро‑плеером."""
+    if not _require_admin():
+        return
+    action = (data or {}).get("action")
+    now = _now_ms()
+
+    with state_lock:
+        active_id = shared_state.get("active_submission_id")
+        pb = dict(shared_state.get("playback") or {})
+
+        if not active_id:
+            return
+
+        cur_pos = _compute_playback_position_ms(pb, now_ms=now)
+
+        if action == "play":
+            pb["is_playing"] = True
+            pb["server_ts_ms"] = now
+        elif action == "pause":
+            pb["is_playing"] = False
+            pb["position_ms"] = cur_pos
+            pb["server_ts_ms"] = now
+        elif action == "stop":
+            pb["is_playing"] = False
+            pb["position_ms"] = 0
+            pb["server_ts_ms"] = now
+        elif action == "restart":
+            pb["position_ms"] = 0
+            pb["server_ts_ms"] = now
+        elif action == "seek":
+            try:
+                target_ms = int((data or {}).get("position_ms") or 0)
+            except Exception:
+                target_ms = 0
+            target_ms = max(0, target_ms)
+
+            # если известна длительность — ограничим
+            try:
+                sub = db.session.get(TrackSubmission, int(active_id))
+                if sub and sub.duration_sec is not None:
+                    max_ms = int(sub.duration_sec) * 1000
+                    if max_ms > 0:
+                        target_ms = min(target_ms, max_ms)
+            except Exception:
+                pass
+
+            pb["position_ms"] = target_ms
+            pb["server_ts_ms"] = now
+        else:
+            return
+
+        shared_state["playback"] = pb
+
+    _broadcast_playback_state()
+
+
 @socketio.on("change_track_name")
 def handle_change_track_name(data):
     if not _require_admin():
@@ -1332,12 +2031,14 @@ def handle_change_track_name(data):
     track_name = (data or {}).get("track_name", "").strip()
     with state_lock:
         shared_state["track_name"] = track_name
-    emit("track_name_changed", {"track_name": track_name}, broadcast=True)
+    emit("track_name_changed", {"track_name": track_name}, broadcast=True, include_self=True)
 
 
 @socketio.on("change_rater_name")
 def handle_change_rater_name(data):
-    if not _require_admin():
+    # Роль "judge" должна иметь возможность менять значения на панели,
+    # иначе локально UI обновится, но остальные клиенты не получат broadcast.
+    if not _require_panel_access():
         return
     rater_id = (data or {}).get("rater_id")
     name = (data or {}).get("name", "").strip()
@@ -1350,12 +2051,13 @@ def handle_change_rater_name(data):
         if name:
             rater["name"] = name
         payload = {"rater_id": rater_id, "name": rater["name"]}
-    emit("rater_name_changed", payload, broadcast=True)
+    emit("rater_name_changed", payload, broadcast=True, include_self=True)
 
 
 @socketio.on("change_slider")
 def handle_change_slider(data):
-    if not _require_admin():
+    # Слайдеры — часть панели оценки, доступна админам и роли "judge".
+    if not _require_panel_access():
         return
     rater_id = (data or {}).get("rater_id")
     criterion_key = (data or {}).get("criterion_key")
@@ -1376,6 +2078,7 @@ def handle_change_slider(data):
         "slider_updated",
         {"rater_id": rater_id, "criterion_key": criterion_key, "value": value},
         broadcast=True,
+        include_self=True,
     )
 
 
@@ -1396,7 +2099,7 @@ def handle_add_rater():
         }
         shared_state["raters"][rid] = new_rater
         payload = {"rater": new_rater}
-    emit("rater_added", payload, broadcast=True)
+    emit("rater_added", payload)
 
 
 @socketio.on("remove_rater")
@@ -1414,7 +2117,7 @@ def handle_remove_rater(data):
             sorted(shared_state["raters"].keys(), key=lambda x: int(x))
         ):
             shared_state["raters"][rid]["order"] = idx
-    emit("rater_removed", {"rater_id": rater_id}, broadcast=True)
+    emit("rater_removed", {"rater_id": rater_id})
 
 
 @socketio.on("evaluate")
@@ -1424,6 +2127,7 @@ def handle_evaluate():
 
     with state_lock:
         track_name = shared_state["track_name"] or "Без названия"
+        active_submission_id = shared_state.get("active_submission_id")
         raters_list = list(shared_state["raters"].values())
         raters_list.sort(key=lambda r: r.get("order", 0))
 
@@ -1431,8 +2135,25 @@ def handle_evaluate():
         return
 
     track = Track(name=track_name)
+    if active_submission_id:
+        try:
+            track.submission_id = int(active_submission_id)
+        except Exception:
+            track.submission_id = None
     db.session.add(track)
     db.session.flush()
+
+    # Если трек пришёл из очереди — пометим submission как "done" и свяжем с Track.
+    if getattr(track, "submission_id", None):
+        try:
+            sub = db.session.get(TrackSubmission, int(track.submission_id))
+            if sub and sub.status not in ("deleted", "failed", "converting"):
+                sub.linked_track_id = track.id
+                # если уже играли, то по факту он теперь оценён
+                if sub.status in ("queued", "playing"):
+                    sub.status = "done"
+        except Exception as e:
+            print("Warning: could not link submission to track:", e)
 
     rater_results = []
     for r in raters_list:
@@ -1475,6 +2196,28 @@ def handle_evaluate():
     )
 
     db.session.commit()
+
+    # После оценки трека из очереди — убираем его из текущего воспроизведения,
+    # чтобы он исчезал из очереди (status=done) и не оставался "активным сейчас".
+    if active_submission_id:
+        try:
+            with state_lock:
+                # фиксируем остановку плеера для всех
+                shared_state["active_submission_id"] = None
+                shared_state["playback"] = {
+                    "is_playing": False,
+                    "position_ms": 0,
+                    "server_ts_ms": _now_ms(),
+                }
+        except Exception:
+            pass
+
+        # Сообщаем всем клиентам сразу: очередь обновилась и активного трека больше нет.
+        try:
+            _broadcast_playback_state()
+            _broadcast_queue_state()
+        except Exception:
+            pass
 
     # рассчитываем средний балл по треку так же, как для страницы топа
     track_avg = (
@@ -1521,18 +2264,39 @@ def handle_evaluate():
         "overall": round(overall, 2),
         "top_position": top_position,
     }
-    emit("evaluation_result", payload, broadcast=True)
+    emit("evaluation_result", payload)
 
 
 @socketio.on("reset_state")
 def handle_reset_state():
     if not _require_admin():
         return
+    old_active_id = None
     with state_lock:
         shared_state["track_name"] = ""
+        old_active_id = shared_state.get("active_submission_id")
+        shared_state["active_submission_id"] = None
+        shared_state["playback"] = {
+            "is_playing": False,
+            "position_ms": 0,
+            "server_ts_ms": _now_ms(),
+        }
         for r in shared_state["raters"].values():
             r["scores"] = {key: 0 for key, _ in CRITERIA}
-    emit("state_reset", _serialize_state(), broadcast=True)
+
+    # если сбросили состояние во время проигрывания — вернём трек обратно в очередь (если он не оценён)
+    if old_active_id:
+        try:
+            sub = db.session.get(TrackSubmission, int(old_active_id))
+            if sub and sub.status == "playing" and not sub.linked_track_id:
+                sub.status = "queued"
+                db.session.commit()
+        except Exception:
+            pass
+
+    emit("state_reset", _serialize_state())
+    _broadcast_playback_state()
+    _broadcast_queue_state()
 
 
 if __name__ == "__main__":

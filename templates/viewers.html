@@ -30,9 +30,9 @@
                 {% for t in tracks %}
                     <tr class="top-row viewer-track-row"
                         data-track-id="{{ t.id }}">
-                        <td class="top-pos">{{ (page - 1) * 15 + loop.index }}</td>
-                        <td class="top-name-cell">{{ t.name }}</td>
-                        <td class="top-date-cell">
+                        <td class="top-pos" data-label="#">{{ (page - 1) * 15 + loop.index }}</td>
+                        <td class="top-name-cell" data-label="Трек">{{ t.name }}</td>
+                        <td class="top-date-cell" data-label="Добавлен">
                             {% if t.created_at %}
                                 {{ t.created_at.strftime("%d.%m.%Y %H:%M") }}
                             {% else %}
