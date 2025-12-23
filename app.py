@@ -22,6 +22,9 @@ from flask import (
     send_from_directory,
 )
 from werkzeug.utils import secure_filename
+import uuid
+import bleach
+
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit
 from sqlalchemy import func, text
@@ -34,6 +37,46 @@ UPLOAD_DIR = os.getenv(
     os.path.join(BASE_DIR, "static", "uploads"),
 )
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+NEWS_UPLOAD_DIR = os.path.join(UPLOAD_DIR, "news")
+os.makedirs(NEWS_UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_NEWS_TAGS = [
+    "p",
+    "br",
+    "strong",
+    "b",
+    "em",
+    "i",
+    "u",
+    "s",
+    "blockquote",
+    "code",
+    "pre",
+    "ul",
+    "ol",
+    "li",
+    "h1",
+    "h2",
+    "h3",
+    "hr",
+]
+ALLOWED_NEWS_ATTRS = {
+    "a": ["href", "title", "target", "rel"],
+}
+ALLOWED_NEWS_PROTOCOLS = ["http", "https", "mailto"]
+
+
+def sanitize_news_html(raw_html: str) -> str:
+    cleaned = bleach.clean(
+        raw_html or "",
+        tags=ALLOWED_NEWS_TAGS + ["a"],
+        attributes=ALLOWED_NEWS_ATTRS,
+        protocols=ALLOWED_NEWS_PROTOCOLS,
+        strip=True,
+    )
+    cleaned = bleach.linkify(cleaned)
+    return cleaned
 
 # -------------------------
 # Track submissions (queue)
@@ -159,6 +202,22 @@ class News(db.Model):
     text = db.Column(db.Text, nullable=True)
     tag = db.Column(db.String(64), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+
+class NewsAttachment(db.Model):
+    __tablename__ = "news_attachments"
+
+    id = db.Column(db.Integer, primary_key=True)
+    news_id = db.Column(db.Integer, db.ForeignKey("news_items.id"), nullable=False, index=True)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    news = db.relationship(
+        "News",
+        backref=db.backref("attachments", lazy="select", cascade="all, delete-orphan"),
+    )
 
 
 class StreamConfig(db.Model):
@@ -349,6 +408,14 @@ shared_state = {
     },
 }
 
+
+
+
+def _is_image_filename(filename: str) -> bool:
+    if not filename:
+        return False
+    lname = filename.lower()
+    return any(lname.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"))
 
 
 def get_current_user():
@@ -759,31 +826,57 @@ def home():
     news_query = db.session.query(News).order_by(News.created_at.desc())
     news_pagination = news_query.paginate(page=page, per_page=per_page, error_out=False)
 
-    # подготовим карту вложений для новостей на главной
+    # подготовим вложения для новостей на главной (поддержка нескольких файлов)
+    page_news_ids = [n.id for n in news_pagination.items]
+    attachments_by_news = {nid: [] for nid in page_news_ids}
+
+    # новые вложения (через таблицу news_attachments)
+    if page_news_ids:
+        try:
+            rows = (
+                db.session.query(NewsAttachment)
+                .filter(NewsAttachment.news_id.in_(page_news_ids))
+                .order_by(NewsAttachment.uploaded_at.asc())
+                .all()
+            )
+            for att in rows:
+                attachments_by_news.setdefault(att.news_id, []).append(
+                    {
+                        "stored": att.stored_filename,
+                        "original": att.original_filename,
+                        "is_image": _is_image_filename(att.stored_filename),
+                        "url": url_for("static", filename="uploads/news/" + att.stored_filename),
+                    }
+                )
+        except Exception:
+            # если таблицы ещё нет или что-то пошло не так — молча падаем на legacy-режим
+            pass
+
+    # legacy-вложение (старый формат: файл news_<id>_* в static/uploads)
     try:
         _home_filenames = os.listdir(UPLOAD_DIR)
     except FileNotFoundError:
         _home_filenames = []
 
-    _home_attachments = {}
-    for _n in news_pagination.items:
-        _prefix = f"news_{_n.id}_"
+    for nid in page_news_ids:
+        if attachments_by_news.get(nid):
+            continue
+        _prefix = f"news_{nid}_"
         for _fname in _home_filenames:
             if _fname.startswith(_prefix):
-                _home_attachments[_n.id] = _fname
+                attachments_by_news[nid] = [
+                    {
+                        "stored": _fname,
+                        "original": _fname.replace(_prefix, "", 1) or _fname,
+                        "is_image": _is_image_filename(_fname),
+                        "url": url_for("static", filename="uploads/" + _fname),
+                    }
+                ]
                 break
 
     news_items = []
     for n in news_pagination.items:
-        attachment = _home_attachments.get(n.id)
-        is_image = False
-        if attachment:
-            _lname = attachment.lower()
-            for _ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"):
-                if _lname.endswith(_ext):
-                    is_image = True
-                    break
-
+        attachments = attachments_by_news.get(n.id, []) or []
         news_items.append(
             {
                 "id": n.id,
@@ -791,8 +884,7 @@ def home():
                 "text": n.text,
                 "tag": n.tag,
                 "date": n.created_at.strftime("%d.%m.%Y") if n.created_at else None,
-                "attachment": attachment,
-                "attachment_is_image": is_image,
+                "attachments": attachments,
             }
         )
 
@@ -923,11 +1015,199 @@ def delete_news(news_id):
         flash("Новость не найдена", "error")
         return redirect(url_for("admin"))
 
+    # удалить файлы вложений (новый формат)
+    try:
+        for att in list(getattr(news, "attachments", []) or []):
+            try:
+                file_path = os.path.join(NEWS_UPLOAD_DIR, att.stored_filename)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # удалить legacy-вложение (старый формат: news_<id>_* в static/uploads)
+    try:
+        for fname in os.listdir(UPLOAD_DIR):
+            if fname.startswith(f"news_{news.id}_"):
+                try:
+                    os.remove(os.path.join(UPLOAD_DIR, fname))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     db.session.delete(news)
     db.session.commit()
     flash("Новость удалена", "success")
     return redirect(url_for("admin"))
 
+    db.session.delete(news)
+    db.session.commit()
+    flash("Новость удалена", "success")
+    return redirect(url_for("admin"))
+
+
+
+@app.route("/admin/news/new", methods=["GET", "POST"])
+def news_new():
+    if not _require_admin():
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        title = (request.form.get("title") or "").strip()
+        tag = (request.form.get("tag") or "").strip() or None
+        raw_html = request.form.get("text_html") or ""
+        text_html = sanitize_news_html(raw_html)
+
+        if not title:
+            flash("Заголовок не может быть пустым", "error")
+            return redirect(url_for("news_new"))
+
+        news = News(title=title, text=text_html or None, tag=tag)
+        db.session.add(news)
+        db.session.commit()
+
+        # множественные вложения
+        files = request.files.getlist("attachments")
+        for f in files or []:
+            if not f or not getattr(f, "filename", ""):
+                continue
+            original = f.filename
+            safe = secure_filename(original)
+            if not safe:
+                continue
+            stored = f"news_{news.id}_{uuid.uuid4().hex}_{safe}"
+            try:
+                f.save(os.path.join(NEWS_UPLOAD_DIR, stored))
+                db.session.add(
+                    NewsAttachment(
+                        news_id=news.id,
+                        stored_filename=stored,
+                        original_filename=original,
+                    )
+                )
+            except Exception as e:
+                print("Failed to save news attachment:", e)
+
+        db.session.commit()
+        flash("Новость добавлена", "success")
+        return redirect(url_for("admin", tab="news"))
+
+    return render_template("news_edit.html", mode="create", news=None)
+
+
+@app.route("/admin/news/<int:news_id>/edit", methods=["GET", "POST"])
+def news_edit(news_id: int):
+    if not _require_admin():
+        return redirect(url_for("login"))
+
+    news = db.session.get(News, news_id)
+    if not news:
+        flash("Новость не найдена", "error")
+        return redirect(url_for("admin", tab="news"))
+
+    if request.method == "POST":
+        title = (request.form.get("title") or "").strip()
+        tag = (request.form.get("tag") or "").strip() or None
+        raw_html = request.form.get("text_html") or ""
+        text_html = sanitize_news_html(raw_html)
+
+        if not title:
+            flash("Заголовок не может быть пустым", "error")
+            return redirect(url_for("news_edit", news_id=news_id))
+
+        news.title = title
+        news.tag = tag
+        news.text = text_html or None
+        db.session.commit()
+
+        # добавить новые вложения (если есть)
+        files = request.files.getlist("attachments")
+        for f in files or []:
+            if not f or not getattr(f, "filename", ""):
+                continue
+            original = f.filename
+            safe = secure_filename(original)
+            if not safe:
+                continue
+            stored = f"news_{news.id}_{uuid.uuid4().hex}_{safe}"
+            try:
+                f.save(os.path.join(NEWS_UPLOAD_DIR, stored))
+                db.session.add(
+                    NewsAttachment(
+                        news_id=news.id,
+                        stored_filename=stored,
+                        original_filename=original,
+                    )
+                )
+            except Exception as e:
+                print("Failed to save news attachment:", e)
+
+        db.session.commit()
+        flash("Новость обновлена", "success")
+        return redirect(url_for("admin", tab="news"))
+
+    # подготовим вложения (новый формат + legacy)
+    attachments = []
+    try:
+        for att in getattr(news, "attachments", []) or []:
+            attachments.append(
+                {
+                    "id": att.id,
+                    "stored": att.stored_filename,
+                    "original": att.original_filename,
+                    "is_image": _is_image_filename(att.stored_filename),
+                    "url": url_for("static", filename="uploads/news/" + att.stored_filename),
+                }
+            )
+    except Exception:
+        pass
+
+    # legacy (если есть и нет новых)
+    if not attachments:
+        try:
+            for fname in os.listdir(UPLOAD_DIR):
+                if fname.startswith(f"news_{news.id}_"):
+                    attachments.append(
+                        {
+                            "id": None,
+                            "stored": fname,
+                            "original": fname.replace(f"news_{news.id}_", "", 1) or fname,
+                            "is_image": _is_image_filename(fname),
+                            "url": url_for("static", filename="uploads/" + fname),
+                        }
+                    )
+            # legacy может быть несколько, но оставим все найденные
+        except Exception:
+            pass
+
+    return render_template("news_edit.html", mode="edit", news=news, attachments=attachments)
+
+
+@app.route("/admin/news/attachment/<int:attachment_id>/delete", methods=["POST"])
+def news_attachment_delete(attachment_id: int):
+    if not _require_admin():
+        return redirect(url_for("login"))
+
+    att = db.session.get(NewsAttachment, attachment_id)
+    if not att:
+        flash("Вложение не найдено", "error")
+        return redirect(url_for("admin", tab="news"))
+
+    news_id = att.news_id
+    try:
+        file_path = os.path.join(NEWS_UPLOAD_DIR, att.stored_filename)
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+    except Exception:
+        pass
+
+    db.session.delete(att)
+    db.session.commit()
+    flash("Вложение удалено", "success")
+    return redirect(url_for("news_edit", news_id=news_id))
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
     """
@@ -994,6 +1274,40 @@ def admin():
                 flash("Админ удалён", "success")
                 return redirect(url_for("admin", tab="users"))
 
+            elif action == "update_role":
+                user_id = request.form.get("user_id", type=int)
+                new_role = (request.form.get("role") or "").strip() or "user"
+                if not user_id:
+                    flash("Не указан пользователь", "error")
+                    return redirect(url_for("admin", tab="users"))
+
+                user = db.session.get(User, user_id)
+                if not user:
+                    flash("Пользователь не найден", "error")
+                    return redirect(url_for("admin", tab="users"))
+
+                allowed_roles = {"user", "judge", "admin", "superadmin"}
+                if new_role not in allowed_roles:
+                    flash("Некорректная роль", "error")
+                    return redirect(url_for("admin", tab="users"))
+
+                current = get_current_user()
+
+                # Нельзя разжаловать самого себя (чтобы не потерять доступ к админке)
+                if current and current.id == user.id and new_role != user.role:
+                    flash("Нельзя менять роль самому себе", "error")
+                    return redirect(url_for("admin", tab="users"))
+
+                # Нельзя менять роль главного админа через UI
+                if user.is_superadmin() and new_role != "superadmin":
+                    flash("Нельзя менять роль главного админа", "error")
+                    return redirect(url_for("admin", tab="users"))
+
+                user.role = new_role
+                db.session.commit()
+                flash("Роль обновлена", "success")
+                return redirect(url_for("admin", tab="users"))
+
 
         # Модерация комментариев к трекам
         if form_type == "comments":
@@ -1024,34 +1338,55 @@ def admin():
         # Добавление новости
         if form_type == "news":
             title = (request.form.get("title") or "").strip()
-            text = (request.form.get("text") or "").strip()
             tag = (request.form.get("tag") or "").strip() or None
+
+            # поддержка старого поля text и нового text_html из редактора
+            raw_html = request.form.get("text_html")
+            if raw_html is None:
+                raw_html = request.form.get("text") or ""
+            text_html = sanitize_news_html(raw_html)
 
             if not title:
                 flash("Заголовок не может быть пустым", "error")
             else:
-                news = News(title=title, text=text or None, tag=tag)
+                news = News(title=title, text=text_html or None, tag=tag)
                 db.session.add(news)
                 db.session.commit()
 
-                # обработка вложенного файла
-                file = request.files.get("attachment")
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    if filename:
-                        stored_name = f"news_{news.id}_" + filename
-                        file_path = os.path.join(UPLOAD_DIR, stored_name)
-                        try:
-                            file.save(file_path)
-                        except Exception as e:
-                            print("Failed to save attachment for news", news.id, e)
-                            flash("Новость добавлена, но вложение сохранить не удалось", "warning")
-                        else:
-                            flash("Новость добавлена", "success")
-                            return redirect(url_for("admin"))
+                # множественные вложения (новый формат)
+                files = request.files.getlist("attachments")
+                if not files:
+                    # legacy: одно поле attachment
+                    legacy = request.files.get("attachment")
+                    files = [legacy] if legacy else []
 
+                for f in files or []:
+                    if not f or not getattr(f, "filename", ""):
+                        continue
+                    original = f.filename
+                    safe = secure_filename(original)
+                    if not safe:
+                        continue
+                    stored = f"news_{news.id}_{uuid.uuid4().hex}_{safe}"
+                    try:
+                        f.save(os.path.join(NEWS_UPLOAD_DIR, stored))
+                        db.session.add(
+                            NewsAttachment(
+                                news_id=news.id,
+                                stored_filename=stored,
+                                original_filename=original,
+                            )
+                        )
+                    except Exception as e:
+                        print("Failed to save attachment for news", news.id, e)
+                        flash("Новость добавлена, но вложение сохранить не удалось", "warning")
+
+                db.session.commit()
                 flash("Новость добавлена", "success")
-                return redirect(url_for("admin"))
+                return redirect(url_for("admin", tab="news"))
+
+            return redirect(url_for("admin", tab="news"))
+ 
 
         # Обновление настроек стрима (тоггл: начать / закончить)
         elif form_type == "stream":
@@ -1118,18 +1453,52 @@ def admin():
     news_pagination = news_query.paginate(page=page, per_page=per_page, error_out=False)
     news_list = news_pagination.items
 
-    # карта вложений: news_id -> имя файла (если есть)
-    attachments = {}
+    # вложения для новостей в админке (поддержка нескольких файлов)
+    news_ids = [n.id for n in news_list]
+    attachments = {nid: [] for nid in news_ids}
+
+    if news_ids:
+        try:
+            rows = (
+                db.session.query(NewsAttachment)
+                .filter(NewsAttachment.news_id.in_(news_ids))
+                .order_by(NewsAttachment.uploaded_at.asc())
+                .all()
+            )
+            for att in rows:
+                attachments.setdefault(att.news_id, []).append(
+                    {
+                        "id": att.id,
+                        "stored": att.stored_filename,
+                        "original": att.original_filename,
+                        "is_image": _is_image_filename(att.stored_filename),
+                        "url": url_for("static", filename="uploads/news/" + att.stored_filename),
+                    }
+                )
+        except Exception:
+            pass
+
+    # legacy-вложения (старый формат)
     try:
         filenames = os.listdir(UPLOAD_DIR)
     except FileNotFoundError:
         filenames = []
 
     for n in news_list:
+        if attachments.get(n.id):
+            continue
         prefix = f"news_{n.id}_"
         for fname in filenames:
             if fname.startswith(prefix):
-                attachments[n.id] = fname
+                attachments[n.id] = [
+                    {
+                        "id": None,
+                        "stored": fname,
+                        "original": fname.replace(prefix, "", 1) or fname,
+                        "is_image": _is_image_filename(fname),
+                        "url": url_for("static", filename="uploads/" + fname),
+                    }
+                ]
                 break
 
     current_user = get_current_user()

@@ -128,28 +128,12 @@
                 </p>
             </div>
 
-            <form method="post" class="admin-news-form" enctype="multipart/form-data">
-                <input type="hidden" name="form" value="news">
-                <label class="auth-field">
-                    <span>Заголовок</span>
-                    <input type="text" name="title" required maxlength="255" placeholder="Например: Запуск ANTIGAZ Hub">
-                </label>
-                <label class="auth-field">
-                    <span>Тег (опционально)</span>
-                    <input type="text" name="tag" maxlength="64" placeholder="Анонс, Апдейт, Стрим...">
-                </label>
-                <label class="auth-field">
-                    <span>Текст новости <small class="field-hint">(поддерживаются базовые HTML-теги: &lt;b&gt;, &lt;a&gt;, &lt;br&gt;, &lt;img&gt;)</small></span>
-                    <textarea name="text" rows="4" placeholder="Кратко опиши, что изменилось или что планируется."></textarea>
-                </label>
-                <label class="auth-field">
-                    <span>Вложение (картинка, видео, файл)</span>
-                    <input type="file" name="attachment">
-                </label>
-                <div class="admin-actions">
-                    <button type="submit" class="btn-primary">Добавить новость</button>
-                </div>
-            </form>
+            <div class="admin-actions" style="margin-top: 8px;">
+                <a href="{{ url_for('news_new') }}" class="btn-primary">Создать новость</a>
+                <p class="home-empty" style="margin: 8px 0 0;">
+                    Откроется редактор с предпросмотром и поддержкой нескольких вложений.
+                </p>
+            </div>
         </div>
 
         <div class="home-block">
@@ -173,26 +157,35 @@
                         </div>
                         <h3 class="news-title">{{ n.title }}</h3>
                         {% if n.text %}
-                            <p class="news-text">{{ n.text|safe }}</p>
+                            <div class="news-text news-text--rich">{{ n.text|safe }}</div>
                         {% endif %}
 
-                        {% set attach_filename = attachments.get(n.id) %}
-                        {% if attach_filename %}
-                            <p class="news-attachment">
-                                <a href="{{ url_for('static', filename='uploads/' ~ attach_filename) }}"
-                                   target="_blank"
-                                   rel="noopener">
-                                    Вложение к новости
-                                </a>
-                            </p>
+                        {% set attach_list = attachments.get(n.id) %}
+                        {% if attach_list %}
+                            <div class="news-attachments">
+                                {% for a in attach_list %}
+                                    {% if a.is_image %}
+                                        <a class="news-attachment-image" href="{{ a.url }}" target="_blank" rel="noopener">
+                                            <img src="{{ a.url }}" alt="{{ a.original }}">
+                                        </a>
+                                    {% else %}
+                                        <a class="news-attachment-file" href="{{ a.url }}" target="_blank" rel="noopener">
+                                            {{ a.original }}
+                                        </a>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
                         {% endif %}
 
-                        <form method="post"
+                        <div class="admin-news-actions" style="display:flex; gap:8px; align-items:center;">
+                            <a href="{{ url_for('news_edit', news_id=n.id) }}" class="btn-ghost-small">Редактировать</a>
+                            <form method="post"
                               action="{{ url_for('delete_news', news_id=n.id) }}"
                               class="admin-news-actions"
                               onsubmit="return confirm('Удалить эту новость?');">
                             <button type="submit" class="btn-ghost-small">Удалить</button>
                         </form>
+                        </div>
                     </article>
                     {% endfor %}
                 {% else %}
@@ -339,6 +332,7 @@
                                 <th>Логин</th>
                                 <th>Роль</th>
                                 <th>Создан</th>
+                                <th style="width: 240px;">Смена роли</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -352,11 +346,31 @@
                                         Главный админ
                                     {% elif u.role == 'judge' %}
                                         Оценщик
+                                    {% elif u.role == 'user' %}
+                                        Пользователь
                                     {% else %}
                                         Админ
                                     {% endif %}
                                 </td>
                                 <td>{{ u.created_at.strftime('%d.%m.%Y %H:%M') if u.created_at else '' }}</td>
+                                <td>
+                                    <form method="post" style="margin: 0; display:flex; gap:8px; align-items:center;">
+                                        <input type="hidden" name="form" value="users">
+                                        <input type="hidden" name="action" value="update_role">
+                                        <input type="hidden" name="user_id" value="{{ u.id }}">
+
+                                        <select name="role" {% if u.is_superadmin() %}disabled{% endif %}>
+                                            <option value="user" {% if u.role == 'user' %}selected{% endif %}>Пользователь</option>
+                                            <option value="judge" {% if u.role == 'judge' %}selected{% endif %}>Оценщик</option>
+                                            <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Админ</option>
+                                            <option value="superadmin" {% if u.role == 'superadmin' %}selected{% endif %}>Главный админ</option>
+                                        </select>
+
+                                        <button type="submit" class="btn-ghost-small" {% if u.is_superadmin() %}disabled{% endif %}>
+                                            Сохранить
+                                        </button>
+                                    </form>
+                                </td>
                                 <td>
                                     <form method="post" style="margin: 0;" onsubmit="return confirm('Удалить этого админа?');">
                                         <input type="hidden" name="form" value="users">

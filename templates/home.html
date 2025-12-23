@@ -13,6 +13,67 @@
     border-radius: 12px;
     margin-top: 4px;
 }
+.news-attachment-image.js-image-preview {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    cursor: zoom-in;
+    text-align: left;
+}
+
+/* Image preview lightbox */
+.img-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.img-lightbox.is-open {
+    display: flex;
+}
+.img-lightbox__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.72);
+}
+.img-lightbox__dialog {
+    position: relative;
+    z-index: 1;
+    max-width: min(1100px, calc(100vw - 48px));
+    max-height: min(85vh, calc(100vh - 96px));
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 28px 80px rgba(0,0,0,0.55);
+    background: rgba(12, 16, 24, 0.92);
+    border: 1px solid rgba(255,255,255,0.08);
+}
+.img-lightbox__img {
+    display: block;
+    max-width: 100%;
+    max-height: 85vh;
+    width: auto;
+    height: auto;
+}
+.img-lightbox__close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(0,0,0,0.38);
+    color: #fff;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+}
+.img-lightbox__close:hover {
+    background: rgba(0,0,0,0.55);
+}
 .news-attachment-link {
     display: inline-flex;
     align-items: center;
@@ -68,7 +129,7 @@
                 <div class="home-section-header">
                     <h2 class="home-section-title">Новости</h2>
                     <p class="home-section-subtitle">
-                        Крупные апдейты, анонсы и внутренняя движуха ANTIGAZ.
+                        Крупные апдейты, анонсы и ANTIGAZ.
                     </p>
                 </div>
                 <div class="home-news-list">
@@ -85,25 +146,25 @@
                                 </div>
                                 <h3 class="news-title">{{ n.title }}</h3>
                                 {% if n.text %}
-                                    <p class="news-text">{{ n.text|safe }}</p>
+                                    <div class="news-text news-text--rich">{{ n.text|safe }}</div>
                                 {% endif %}
 
-                                {% if n.attachment %}
-                                    <div class="news-attachment-block">
-                                        {% if n.attachment_is_image %}
-                                            <a href="{{ url_for('static', filename='uploads/' ~ n.attachment) }}" target="_blank" rel="noopener">
-                                                <img src="{{ url_for('static', filename='uploads/' ~ n.attachment) }}"
-                                                     alt="Вложение к новости"
-                                                     class="news-attachment-image">
-                                            </a>
-                                        {% else %}
-                                            <a href="{{ url_for('static', filename='uploads/' ~ n.attachment) }}"
-                                               target="_blank"
-                                               rel="noopener"
-                                               class="news-attachment-link">
-                                                📎 Вложение к новости
-                                            </a>
-                                        {% endif %}
+                                {% if n.attachments %}
+                                    <div class="news-attachments">
+                                        {% for a in n.attachments %}
+                                            {% if a.is_image %}
+                                                <button type="button"
+                                                        class="news-attachment-image js-image-preview"
+                                                        data-src="{{ a.url }}"
+                                                        data-alt="{{ a.original }}">
+                                                    <img src="{{ a.url }}" alt="{{ a.original }}">
+                                                </button>
+                                            {% else %}
+                                                <a class="news-attachment-file" href="{{ a.url }}" target="_blank" rel="noopener">
+                                                    {{ a.original }}
+                                                </a>
+                                            {% endif %}
+                                        {% endfor %}
                                     </div>
                                 {% endif %}
                             </article>
@@ -198,6 +259,15 @@
     </section>
 </div>
 
+{# Лайтбокс для предпросмотра фото-вложений в новостях #}
+<div class="img-lightbox" id="img-lightbox" aria-hidden="true">
+    <div class="img-lightbox__backdrop" data-close="1"></div>
+    <div class="img-lightbox__dialog" role="dialog" aria-modal="true">
+        <button type="button" class="img-lightbox__close" id="img-lightbox-close" aria-label="Закрыть">×</button>
+        <img class="img-lightbox__img" id="img-lightbox-img" src="" alt="">
+    </div>
+</div>
+
 {# Модалка с деталями по треку такая же, как на странице топа #}
 <div class="modal-backdrop" id="track-modal-backdrop">
     <div class="modal-card">
@@ -268,26 +338,59 @@
     </div>
 </div>
 
-<style>
-.news-attachment-block {
-    margin-top: 8px;
-}
-.news-attachment-image {
-    display: block;
-    max-width: 100%;
-    border-radius: 12px;
-    margin-top: 4px;
-}
-.news-attachment-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 14px;
-    opacity: 0.9;
-}
-.news-attachment-link:hover {
-    opacity: 1;
-}
-</style>
+{% endblock %}
 
+{% block scripts %}
+    {{ super() }}
+    <script>
+        (function () {
+            const lightbox = document.getElementById('img-lightbox');
+            const img = document.getElementById('img-lightbox-img');
+            const closeBtn = document.getElementById('img-lightbox-close');
+            if (!lightbox || !img || !closeBtn) return;
+
+            function openLightbox(src, alt) {
+                img.src = src;
+                img.alt = alt || '';
+                lightbox.classList.add('is-open');
+                lightbox.setAttribute('aria-hidden', 'false');
+                document.body.style.overflow = 'hidden';
+            }
+
+            function closeLightbox() {
+                lightbox.classList.remove('is-open');
+                lightbox.setAttribute('aria-hidden', 'true');
+                img.src = '';
+                document.body.style.overflow = '';
+            }
+
+            // Open on click for any image attachment
+            document.addEventListener('click', function (e) {
+                const btn = e.target.closest('.js-image-preview');
+                if (!btn) return;
+                const src = btn.getAttribute('data-src');
+                const alt = btn.getAttribute('data-alt');
+                if (!src) return;
+                e.preventDefault();
+                openLightbox(src, alt);
+            });
+
+            // Close via X
+            closeBtn.addEventListener('click', closeLightbox);
+
+            // Close via click on backdrop/outside dialog
+            lightbox.addEventListener('click', function (e) {
+                if (e.target && (e.target.getAttribute('data-close') === '1' || e.target === lightbox)) {
+                    closeLightbox();
+                }
+            });
+
+            // Close via ESC
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && lightbox.classList.contains('is-open')) {
+                    closeLightbox();
+                }
+            });
+        })();
+    </script>
 {% endblock %}

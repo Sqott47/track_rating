@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}{% if mode == 'edit' %}Редактировать новость{% else %}Создать новость{% endif %} · ANTIGAZ{% endblock %}
+
+{% block content %}
+<div class="home-shell">
+    <div class="home-block">
+        <div class="home-section-header">
+            <h2 class="home-section-title">
+                {% if mode == 'edit' %}Редактировать новость{% else %}Создать новость{% endif %}
+            </h2>
+            <p class="home-section-subtitle">
+                Редактор поддерживает заголовки, списки, цитаты, ссылки и код-блоки. Перед сохранением можно открыть предпросмотр.
+            </p>
+        </div>
+
+        <form method="post" enctype="multipart/form-data" class="admin-news-form">
+            <label class="auth-field">
+                <span>Заголовок</span>
+                <input type="text" name="title" required maxlength="255" value="{{ news.title if news else '' }}">
+            </label>
+
+            <label class="auth-field">
+                <span>Тег (опционально)</span>
+                <input type="text" name="tag" maxlength="64" value="{{ news.tag if news and news.tag else '' }}">
+            </label>
+
+            <div class="auth-field">
+                <span>Текст новости</span>
+                <div id="editor" style="height: 360px;">{{ news.text|safe if news and news.text else '' }}</div>
+                <input type="hidden" name="text_html" id="text_html">
+                <p class="field-hint">HTML формируется автоматически редактором. Небезопасные теги будут удалены при сохранении.</p>
+            </div>
+
+            <label class="auth-field">
+                <span>Добавить вложения (можно несколько)</span>
+                <input type="file" name="attachments" multiple>
+            </label>
+
+            {% if mode == 'edit' %}
+                <div class="home-divider"></div>
+                <div class="home-section-header" style="margin-top: 0;">
+                    <h3 class="home-section-title" style="font-size: 16px;">Текущие вложения</h3>
+                    <p class="home-section-subtitle">Можно удалить отдельные файлы. Новые файлы добавляются выше.</p>
+                </div>
+
+                {% if attachments %}
+                    <div class="news-attachments-grid">
+                        {% for a in attachments %}
+                            <div class="news-attachment-card">
+                                {% if a.is_image %}
+                                    <a href="{{ a.url }}" target="_blank" rel="noopener">
+                                        <img src="{{ a.url }}" alt="{{ a.original }}" class="news-attachment-thumb">
+                                    </a>
+                                {% else %}
+                                    <a href="{{ a.url }}" target="_blank" rel="noopener" class="news-attachment-file">
+                                        {{ a.original }}
+                                    </a>
+                                {% endif %}
+
+                                {% if a.id %}
+                                    <form method="post"
+                                          action="{{ url_for('news_attachment_delete', attachment_id=a.id) }}"
+                                          onsubmit="return confirm('Удалить это вложение?');">
+                                        <button type="submit" class="btn-ghost-small">Удалить</button>
+                                    </form>
+                                {% else %}
+                                    <span class="news-attachment-legacy">legacy</span>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="home-empty">Вложений пока нет.</p>
+                {% endif %}
+            {% endif %}
+
+            <div class="admin-actions" style="margin-top: 14px; gap: 10px;">
+                <button type="button" id="btnPreview" class="btn-ghost">Предпросмотр</button>
+                <button type="submit" class="btn-primary">Сохранить</button>
+                <a class="btn-ghost" href="{{ url_for('admin', tab='news') }}">Назад</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<link href="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.snow.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+
+<div id="previewModal" class="news-preview-modal" style="display:none;">
+    <div class="news-preview-content">
+        <div class="news-preview-header">
+            <div class="news-preview-title">Предпросмотр</div>
+            <button type="button" id="btnClosePreview" class="btn-ghost-small">Закрыть</button>
+        </div>
+        <div id="previewBody" class="news-text news-text--rich"></div>
+    </div>
+</div>
+
+<script>
+    const quill = new Quill('#editor', {
+        theme: 'snow',
+        modules: {
+            toolbar: [
+                [{ header: [1, 2, 3, false] }],
+                ['bold', 'italic', 'underline', 'strike'],
+                [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+                ['blockquote', 'code-block'],
+                [{ 'align': [] }],
+                ['link'],
+                ['clean']
+            ]
+        }
+    });
+
+    const form = document.querySelector('form');
+    form.addEventListener('submit', function () {
+        document.getElementById('text_html').value = quill.root.innerHTML;
+    });
+
+    const modal = document.getElementById('previewModal');
+    const previewBody = document.getElementById('previewBody');
+    const btnPreview = document.getElementById('btnPreview');
+    const btnClose = document.getElementById('btnClosePreview');
+
+    btnPreview.addEventListener('click', function () {
+        const html = quill.root.innerHTML;
+        previewBody.innerHTML = DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+        modal.style.display = 'block';
+    });
+
+    btnClose.addEventListener('click', function () {
+        modal.style.display = 'none';
+    });
+
+    modal.addEventListener('click', function (e) {
+        if (e.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
+</script>
+{% endblock %}
