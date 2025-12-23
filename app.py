@@ -2633,7 +2633,7 @@ def handle_evaluate():
         "overall": round(overall, 2),
         "top_position": top_position,
     }
-    emit("evaluation_result", payload)
+    emit("evaluation_result", payload, broadcast=True)
 
 
 @socketio.on("reset_state")
