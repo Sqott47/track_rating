@@ -87,4 +87,5 @@ jobs:
 
             # Cleanup old releases (keep last 10)
             cd "$BASE/releases"
-            ls -1dt */ | tail -n +11 | xargs -r rm -rf
+            ls -1dt */ | tail -n +11 | xargs -r sudo rm -rf
+
