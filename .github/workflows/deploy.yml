@@ -77,8 +77,12 @@ jobs:
             fi
 
             # Restart service
+            sudo systemctl restart trackrater-da-poller.service
+            sudo systemctl restart trackrater-tg-bot.service
             sudo systemctl restart track_rating.service
             sudo systemctl status track_rating.service
+            sudo systemctl status trackrater-tg-bot.service
+            sudo systemctl status trackrater-da-poller.service
 
 
             # Cleanup old releases (keep last 10)
