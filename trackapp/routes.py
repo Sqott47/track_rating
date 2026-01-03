@@ -724,7 +724,14 @@ def api_queue_state():
 # Telegram Bot private API
 # -------------------------
 
-TG_API_TOKEN = os.getenv("TRACKRATER_TG_API_TOKEN", "").strip()
+# Telegram bot private API token.
+# Historical note: some deployments used TRACKRATER_TG_API_TOKEN (missing "RATER").
+# Accept both to avoid silent 403s after migrations.
+TG_API_TOKEN = (
+    os.getenv("TRACKRATER_TG_API_TOKEN")
+    or os.getenv("TRACKRATER_TG_API_TOKEN")
+    or ""
+).strip()
 
 def _require_tg_bot_token():
     if not TG_API_TOKEN:
