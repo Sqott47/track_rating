@@ -8,8 +8,7 @@
         <div class="top-panel-main">
             <div class="top-panel-label">Очередь треков</div>
             <p class="top-panel-subtext">
-                Закинь трек в очередь: укажи исполнителя/название и загрузи файл.
-                Трек сразу считается готовым и попадает в общую очередь.
+                Добавление треков через сайт отключено — используйте Telegram-бота.
             </p>
 
             <div class="track-current" style="margin-top: 10px;">
@@ -38,36 +37,16 @@
             <div class="queue-upload-grid">
                 <div class="queue-upload-col">
                     <h2 class="queue-block-title">Добавить трек</h2>
-                    <form class="queue-form" action="{{ url_for('queue_submit') }}" method="post" enctype="multipart/form-data">
-                        <div class="queue-form-row">
-                            <label class="queue-field">
-                                <span class="queue-field-label">Исполнитель</span>
-                                <input class="queue-input" type="text" name="artist" placeholder="Например: ANTIGAZ" maxlength="255" autocomplete="off">
-                            </label>
-                            <label class="queue-field">
-                                <span class="queue-field-label">Название трека</span>
-                                <input class="queue-input" type="text" name="title" placeholder="Например: GAZ MODE" maxlength="255" autocomplete="off">
-                            </label>
-                        </div>
+                    <div class="queue-form-disabled">
+    <div class="queue-disabled-title">Загрузка треков через сайт отключена</div>
+    <p class="queue-disabled-text">
+        Чтобы добавить трек, используйте Telegram-бота.
+    </p>
 
-                        <label class="queue-field">
-                            <span class="queue-field-label">Файл</span>
-                            
-                            <div class="queue-filepicker">
-                                <input id="queue-file-input" class="queue-file-input" type="file" name="file" accept=".mp3,.wav,audio/mpeg,audio/wav" required>
-                                <label class="queue-file-btn" for="queue-file-input">Выберите файл</label>
-                                <div class="queue-file-name" id="queue-file-name">Файл не выбран</div>
-                            </div>
-                            <div class="queue-hint">
-                                Форматы: {{ allowed_exts|join(', ') }} · Максимум: {{ max_mb }} МБ
-                            </div>
-                        </label>
-
-                        <button type="submit" class="btn-primary">Отправить в очередь</button>
-                        <div class="queue-hint" style="margin-top: 8px;">
-                            После загрузки трек сразу появится в очереди.
-                        </div>
-                    </form>
+    <a class="btn-primary" href="https://t.me/antigaz_bot" target="_blank" rel="noopener">
+        Открыть @antigaz_bot
+    </a>
+</div>
                 </div>
                 <div class="queue-upload-col">
                     <h2 class="queue-block-title">Очередь</h2>

@@ -627,89 +627,9 @@ def queue_page():
 
 @app.route("/queue/submit", methods=["POST"])
 def queue_submit():
-    """Принять трек в очередь (публично)."""
-    artist = (request.form.get("artist") or "").strip()
-    title = (request.form.get("title") or "").strip()
-    file = request.files.get("file")
-
-    if not artist and not title:
-        flash("Укажи хотя бы исполнителя или название трека.", "error")
-        return redirect(url_for("queue_page"))
-
-    if not file or not file.filename:
-        flash("Прикрепи аудиофайл (.mp3 или .wav).", "error")
-        return redirect(url_for("queue_page"))
-
-    # Важно: secure_filename() может "съесть" кириллицу полностью.
-    # Расширение берём из исходного имени, а на диск сохраняем под uuid.
-    incoming_name = file.filename
-    dot_ext = os.path.splitext(incoming_name)[1].lower()
-    ext = dot_ext.lstrip(".")
-    if ext not in ALLOWED_SUBMISSION_EXTS:
-        flash("Неподдерживаемый формат. Разрешены: " + ", ".join(sorted(ALLOWED_SUBMISSION_EXTS)), "error")
-        return redirect(url_for("queue_page"))
-
-    file_uuid = uuid4().hex
-    raw_filename = f"{file_uuid}.{ext}"
-    raw_path = os.path.join(SUBMISSIONS_RAW_DIR, raw_filename)
-
-    # Конвертацию отключаем: сразу считаем трек готовым.
-    sub = TrackSubmission(
-        artist=artist or "",
-        title=title or "",
-        priority=0,
-        status="queued",
-        file_uuid=file_uuid,
-        original_filename=incoming_name,
-        original_ext=ext,
-        created_at=datetime.utcnow(),
-        priority_set_at=datetime.utcnow(),
-    )
-    db.session.add(sub)
-    db.session.commit()
-
-    try:
-        # 1) S3 (if configured)
-        s3 = _get_s3_client()
-        if s3 and _s3_is_configured():
-            key = _s3_key_for_submission(file_uuid, ext)
-
-            # rewind stream (important)
-            try:
-                file.stream.seek(0)
-            except Exception:
-                pass
-
-            content_type = "audio/mpeg" if ext == "mp3" else "audio/wav"
-            s3.upload_fileobj(
-                Fileobj=file.stream,
-                Bucket=S3_BUCKET,
-                Key=key,
-                ExtraArgs={"ContentType": content_type},
-            )
-
-            # 2) Optional local fallback copy
-            if S3_KEEP_LOCAL:
-                try:
-                    file.stream.seek(0)
-                except Exception:
-                    pass
-                file.save(raw_path)
-
-        else:
-            # Local dev / no S3
-            file.save(raw_path)
-
-    except Exception as e:
-        print("Failed to save submission file:", e)
-        sub.status = "failed"
-        db.session.commit()
-        flash("Не удалось сохранить файл. Попробуй ещё раз.", "error")
-        return redirect(url_for("queue_page"))
-
-    _broadcast_queue_state()
-    flash("Трек добавлен в очередь.", "success")
-    return redirect(url_for("queue_page"))
+    """Upload via website is disabled (live queue only)."""
+    # Intentionally disabled: tracks must be submitted via Telegram bot.
+    return jsonify({"error": "upload_disabled"}), 410
 
 
 @app.route("/api/queue")
@@ -929,7 +849,7 @@ def tg_waiting_payment(submission_id: int):
     sub.payment_amount = prio
     provider = (data.get("provider") or "").strip() or None
     ref = (data.get("provider_ref") or data.get("ref") or "").strip() or None
-    if provider not in (None, "stars", "donationalerts"):
+    if provider not in (None, "donationalerts"):
         return jsonify({"error": "bad provider"}), 400
     sub.payment_provider = provider
     sub.payment_ref = ref
@@ -956,7 +876,7 @@ def tg_mark_paid(submission_id: int):
     provider_ref = (data.get("provider_ref") or "").strip()
     amount = int(data.get("amount") or 0)
 
-    if provider not in ("stars", "donationalerts"):
+    if provider not in ("donationalerts",):
         return jsonify({"error": "bad provider"}), 400
     if not provider_ref:
         return jsonify({"error": "provider_ref required"}), 400

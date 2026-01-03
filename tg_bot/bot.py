@@ -4,9 +4,8 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from .config import load_settings, Settings
+from .config import load_settings
 from .services.trackrater_api import TrackRaterAPI
-
 from .handlers import start, submit, payments, raise_priority
 
 logging.basicConfig(level=logging.INFO)
@@ -18,7 +17,7 @@ async def main():
 
     api = TrackRaterAPI(settings.trackrater_base_url, settings.trackrater_bot_token)
 
-    # Inject dependencies
+    # Inject deps
     dp["settings"] = settings
     dp["api"] = api
 

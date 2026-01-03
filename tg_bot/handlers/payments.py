@@ -1,83 +1,90 @@
-from aiogram import Router, F
-from aiogram.types import CallbackQuery, LabeledPrice, PreCheckoutQuery, Message
-from aiogram.fsm.context import FSMContext
+from __future__ import annotations
+
 import secrets
+import time
 
+from aiogram import Router, F
+from aiogram.types import CallbackQuery, Message
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 
-from ..services.trackrater_api import TrackRaterAPI
 from ..config import Settings
+from ..services.trackrater_api import TrackRaterAPI
 from ..keyboards.main import main_menu_kb
 
 router = Router()
 
-def _da_link(base: str) -> str:
-    return base or ""
+def _new_code() -> str:
+    # human-friendly short token
+    return secrets.token_hex(4)
 
+def _state_started(now: float | None = None) -> dict:
+    return {"started_at": (now or time.time())}
 
-@router.callback_query(F.data.startswith("pay:stars:"))
-async def pay_stars(call: CallbackQuery, state: FSMContext):
-    await call.answer()
-    _, _, sid, prio = call.data.split(":")
-    sid_i = int(sid); prio_i=int(prio)
+def _is_expired(data: dict, settings: Settings) -> bool:
+    started_at = float(data.get("started_at") or 0)
+    return bool(started_at and (time.time() - started_at) > settings.fsm_ttl_seconds)
 
-    payload = f"TR:{sid_i}:P{prio_i}"
-    prices = [LabeledPrice(label=f"Приоритет {prio_i}", amount=prio_i)]
-
-    await call.bot.send_invoice(
-        chat_id=call.from_user.id,
-        title="TrackRater — приоритет трека",
-        description=f"Оплата приоритета {prio_i} (Stars). Код: {payload}",
-        payload=payload,
-        provider_token="",  # empty for Stars
-        currency="XTR",
-        prices=prices,
-        start_parameter="trackrater_priority",
-    )
-    await call.message.answer("⭐ Инвойс отправлен. После оплаты я автоматически добавлю/подниму трек.")
-
-@router.pre_checkout_query()
-async def pre_checkout(pre: PreCheckoutQuery):
-    # Accept all payloads that look like ours
-    ok = bool(pre.invoice_payload and pre.invoice_payload.startswith("TR:"))
-    await pre.answer(ok=ok, error_message=None if ok else "Некорректный платёж.")
-
-@router.message(F.successful_payment)
-async def successful_payment(msg: Message, api: TrackRaterAPI):
-    sp = msg.successful_payment
-    payload = sp.invoice_payload or ""
-    # payload format: TR:<id>:P<prio>
+async def _cleanup_backend_if_needed(state: FSMContext, api: TrackRaterAPI) -> None:
     try:
-        parts = payload.split(":")
-        sid = int(parts[1])
-        prio = int(parts[2].lstrip("P"))
+        data = await state.get_data()
+        sid = data.get("submission_id")
+        if sid:
+            await api.cancel_submission(int(sid))
     except Exception:
-        await msg.answer("Платёж получен, но не смог распознать заявку. Напишите администратору.")
-        return
+        pass
 
-    provider_ref = sp.telegram_payment_charge_id
-    result = await api.mark_paid(sid, provider="stars", provider_ref=provider_ref, amount=prio)
-    pos = result.get("position")
-    await msg.answer(f"✅ Оплата прошла! Трек добавлен/поднят.\nПозиция: {pos}", reply_markup=main_menu_kb())
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext, api: TrackRaterAPI):
+    await _cleanup_backend_if_needed(state, api)
+    await state.clear()
+    await message.answer("Ок, отменил.", reply_markup=main_menu_kb())
+
+@router.callback_query(F.data == "nav:cancel")
+async def nav_cancel(call: CallbackQuery, state: FSMContext, api: TrackRaterAPI):
+    await call.answer()
+    await _cleanup_backend_if_needed(state, api)
+    await state.clear()
+    await call.message.answer("Ок, отменил.", reply_markup=main_menu_kb())
 
 @router.callback_query(F.data.startswith("pay:da:"))
-async def pay_da(call: CallbackQuery, state: FSMContext, settings: Settings, api: TrackRaterAPI):
-    await call.answer()
-    _, _, sid, prio = call.data.split(":")
-    sid_i=int(sid); prio_i=int(prio)
-    code = f"TR-{sid_i}-P{prio_i}-" + secrets.token_hex(3).upper()
-    await api.set_waiting_payment(sid_i, priority=prio_i, provider="donationalerts", provider_ref=code)
-    link = _da_link(settings.donationalerts_base_url)
+async def pay_donationalerts(call: CallbackQuery, state: FSMContext, settings: Settings, api: TrackRaterAPI):
+    """DonationAlerts payment instruction.
 
+    Flow:
+    - generate unique code
+    - store it into submission.payment_ref via /waiting_payment
+    - show instructions and clear FSM
+    """
+    await call.answer()
+
+    parts = (call.data or "").split(":")
+    # pay:da:<submission_id>:<priority>
+    if len(parts) < 4:
+        await call.message.answer("Ошибка оплаты: некорректные данные.", reply_markup=main_menu_kb())
+        return
+
+    submission_id = int(parts[2])
+    prio_i = int(parts[3])
+
+    code = _new_code()
+    try:
+        await api.set_waiting_payment(submission_id, priority=prio_i, provider="donationalerts", provider_ref=code)
+    except Exception as e:
+        await call.message.answer(f"Не удалось подготовить оплату: {e}", reply_markup=main_menu_kb())
+        return
+
+    link = (settings.donationalerts_base_url or "").strip()
     text = (
-        f"💸 DonationAlerts:\n\n"
+        f"💸 DonationAlerts\n\n"
         f"Сумма: {prio_i}\n"
         f"Комментарий: {code}\n\n"
-        f"⚠️ Внимание! Не меняйте сумму и комментарий, иначе бот не распознает оплату.\n"
+        f"⚠️ Важно: не меняйте сумму и комментарий, иначе бот не распознает оплату."
     )
     if link:
-        text += f"\nСсылка: {link}"
+        text += f"\n\nСсылка: {link}"
     else:
-        text += "\n(Ссылка не настроена: установите DONATIONALERTS_URL в .env)"
+        text += "\n\n(Ссылка не настроена: установите DONATIONALERTS_URL в .env)"
     await state.clear()
     await call.message.answer(text)
     await call.message.answer("Главное меню:", reply_markup=main_menu_kb())
