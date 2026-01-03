@@ -917,7 +917,7 @@ def tg_waiting_payment(submission_id: int):
         return jsonify({"error": "not found"}), 404
     data = request.get_json(silent=True) or {}
     prio = int(data.get("priority") or 0)
-    if prio not in (100, 200, 300, 400):
+    if prio not in (1, 100, 200, 300, 400):
         return jsonify({"error": "bad priority"}), 400
     if not (sub.artist or "").strip() and not (sub.title or "").strip():
         return jsonify({"error": "missing metadata"}), 400
