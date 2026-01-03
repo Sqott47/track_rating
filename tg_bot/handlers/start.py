@@ -55,8 +55,35 @@ async def cmd_start(message: Message, state: FSMContext, settings: Settings):
 @router.callback_query(F.data == "sub:check")
 async def cb_check(call: CallbackQuery, state: FSMContext, settings: Settings):
     await call.answer()
-    if await _ensure_subscribed(call, settings):
-        await call.message.answer("✅ Подписка подтверждена. Главное меню:", reply_markup=main_menu_kb())
+
+    user = call.from_user
+    assert user is not None
+
+    # Force re-check ignoring cached membership results.
+    res = await check_subscription(
+        call.bot,
+        user.id,
+        settings.required_chat_ids,
+        settings.required_chat_usernames,
+        force=True,
+        ttl_seconds=10 * 60,
+    )
+
+    if res.ok:
+        await call.message.answer("✅ Подписка подтверждена. Теперь можно продолжить.", reply_markup=main_menu_kb())
+        return
+
+    reason = res.reason or "not_member"
+    if reason == "cant_verify":
+        text = (
+            "Я всё ещё не могу проверить подписку на каналы (скорее всего у бота нет прав или указан неверный chat_id).\n"
+            "Сообщи админу, чтобы добавил бота в каналы или поправил TG_REQUIRED_CHAT_IDS."
+        )
+    elif reason == "rate_limited":
+        text = "Telegram временно ограничивает запросы. Попробуй ещё раз через 20–30 секунд."
+    else:
+        text = "Подписка пока не найдена. Подпишись на каналы и нажми «✅ Проверить подписку» ещё раз:"
+    await call.message.answer(text, reply_markup=check_sub_kb(settings.sponsor_links))
 
 @router.callback_query(F.data == "nav:back")
 async def nav_back(call: CallbackQuery, state: FSMContext, settings: Settings):

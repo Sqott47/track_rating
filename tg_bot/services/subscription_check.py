@@ -24,7 +24,13 @@ async def check_subscription(
     required_chat_ids: List[int],
     required_chat_usernames: Optional[List[str]] = None,
     *,
+    # If True, bypass cached membership results and query Telegram again.
+    # Useful for an explicit "✅ Проверить подписку" button.
+    force: bool = False,
+    # Cache TTL for *positive* (member) result.
+    # Negative (not a member) is cached only briefly to avoid stale state after user subscribes.
     ttl_seconds: int = 10 * 60,
+    ttl_not_member_seconds: int = 10,
 ) -> SubscriptionCheckResult:
     required_chat_usernames = required_chat_usernames or []
 
@@ -69,16 +75,21 @@ async def check_subscription(
 
     for chat_id in ordered_ids:
         key = (int(user_id), int(chat_id))
-        cached = _CACHE.get(key)
-        if cached and cached[1] > now:
-            if not cached[0]:
-                return SubscriptionCheckResult(ok=False, reason="not_member")
-            continue
+        if not force:
+            cached = _CACHE.get(key)
+            if cached and cached[1] > now:
+                if not cached[0]:
+                    return SubscriptionCheckResult(ok=False, reason="not_member")
+                continue
 
         try:
             member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
             ok = member.status in ("member", "administrator", "creator")
-            _CACHE[key] = (ok, now + ttl_seconds)
+            if ok:
+                _CACHE[key] = (True, now + ttl_seconds)
+            else:
+                # Cache negatives only briefly so a user can subscribe and retry without waiting
+                _CACHE[key] = (False, now + max(1, int(ttl_not_member_seconds)))
             if not ok:
                 return SubscriptionCheckResult(ok=False, reason="not_member")
         except TelegramRetryAfter:
