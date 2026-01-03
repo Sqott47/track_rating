@@ -26,7 +26,13 @@ def _expired(data: dict, settings: Settings) -> bool:
 async def _require_sub(call: CallbackQuery, settings: Settings) -> bool:
     user = call.from_user
     assert user is not None
-    res = await check_subscription(call.bot, user.id, settings.required_chat_ids, ttl_seconds=10*60)
+    res = await check_subscription(
+        call.bot,
+        user.id,
+        settings.required_chat_ids,
+        settings.required_chat_usernames,
+        ttl_seconds=10*60,
+    )
     if res.ok:
         return True
     await call.message.answer("Для действия нужна подписка на каналы спонсоров:", reply_markup=check_sub_kb(settings.sponsor_links))

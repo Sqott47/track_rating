@@ -14,6 +14,7 @@ class Settings:
     trackrater_base_url: str
     trackrater_bot_token: str
     required_chat_ids: List[int]
+    required_chat_usernames: List[str]
     sponsor_links: List[str]
     donationalerts_base_url: str
     allowed_exts: List[str]
@@ -30,9 +31,17 @@ def load_settings() -> Settings:
 
     api_token = os.getenv("TRACKRATER_TG_API_TOKEN", "").strip()
     if not api_token:
-        raise RuntimeError("TRACKRATER_TG_BOT_TOKEN is required")
+        raise RuntimeError("TRACKRATER_TG_API_TOKEN is required")
 
-    required_chats = [int(x) for x in _split_csv(os.getenv("TG_REQUIRED_CHAT_IDS", ""))]  # ids of channels
+    # Subscription requirements:
+    # - TG_REQUIRED_CHAT_IDS: comma-separated numeric chat IDs (recommended; works for private channels).
+    # - TG_REQUIRED_CHATS: comma-separated public usernames (e.g. @channelname) for backwards compatibility.
+    raw_ids = os.getenv("TG_REQUIRED_CHAT_IDS", "").strip()
+    raw_names = os.getenv("TG_REQUIRED_CHATS", "").strip()
+
+    required_chat_ids = [int(x) for x in _split_csv(raw_ids)] if raw_ids else []
+    required_chat_usernames = [x.lstrip("@").strip() for x in _split_csv(raw_names)] if raw_names else []
+
     sponsor_links = _split_csv(os.getenv("TG_SPONSOR_LINKS", ""))  # urls to channels/chats
     da_url = os.getenv("DONATIONALERTS_URL", "").strip()
 
@@ -42,7 +51,8 @@ def load_settings() -> Settings:
         bot_token=bot_token,
         trackrater_base_url=base_url,
         trackrater_bot_token=api_token,
-        required_chat_ids=required_chats,
+        required_chat_ids=required_chat_ids,
+        required_chat_usernames=required_chat_usernames,
         sponsor_links=sponsor_links,
         donationalerts_base_url=da_url,
         allowed_exts=allowed_exts,

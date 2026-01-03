@@ -34,7 +34,13 @@ async def _require_sub(msg: Message | CallbackQuery, settings: Settings) -> bool
     bot = msg.bot
     user = msg.from_user
     assert user is not None
-    res = await check_subscription(bot, user.id, settings.required_chat_ids, ttl_seconds=10*60)
+    res = await check_subscription(
+        bot,
+        user.id,
+        settings.required_chat_ids,
+        settings.required_chat_usernames,
+        ttl_seconds=10*60,
+    )
     if res.ok:
         return True
     # show sponsor links
