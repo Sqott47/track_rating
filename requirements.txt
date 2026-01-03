@@ -7,3 +7,6 @@ qrcode>=7.4
 python-socketio>=5.10
 python-engineio>=4.8
 requests
+aiogram==3.*
+aiohttp>=3.9
+python-dotenv>=1.0
