@@ -34,40 +34,7 @@
 </script>
 
 
-{% block body_class %}has-docked-player
-<script>
-(function () {
-  var openBtn = document.getElementById('btn-open-clear-queue');
-  var backdrop = document.getElementById('clear-queue-modal-backdrop');
-  var closeBtn = document.getElementById('clear-queue-close-btn');
-  var cancelBtn = document.getElementById('clear-queue-cancel-btn');
-
-  if (!openBtn || !backdrop) return;
-
-  function openModal() {
-    backdrop.classList.add('is-open');
-    backdrop.setAttribute('aria-hidden', 'false');
-  }
-  function closeModal() {
-    backdrop.classList.remove('is-open');
-    backdrop.setAttribute('aria-hidden', 'true');
-  }
-
-  openBtn.addEventListener('click', openModal);
-  if (closeBtn) closeBtn.addEventListener('click', closeModal);
-  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-
-  backdrop.addEventListener('click', function (e) {
-    if (e.target === backdrop) closeModal();
-  });
-
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && backdrop.classList.contains('is-open')) closeModal();
-  });
-})();
-</script>
-
-{% endblock %}
+{% block body_class %}has-docked-player{% endblock %}
 
 {% block content %}
 <div class="page-content">
@@ -82,7 +49,10 @@
     </section>
 <section class="controls-bar">
         <div class="controls-left">
-            <button type="button" class="btn-ghost" id="add-rater-btn">+ Добавить оценщика</button>
+            <div class="controls-rating-join" style="display:inline-flex; gap:8px; margin-left:8px;">
+                <button type="button" class="btn-primary" id="join-rating-btn">Присоединиться к оценке</button>
+                <button type="button" class="btn-ghost" id="leave-rating-btn" style="display:none;">Покинуть оценку</button>
+            </div>
 
             <div class="track-input-row controls-track-input">
                 <label class="track-label">
@@ -168,117 +138,11 @@
 </div>
 {% endif %}
 
-<div class="modal-backdrop" id="result-modal-backdrop">
-    <div class="modal-card">
-        <div class="modal-header">
-            <div>
-                <div class="modal-title">Результаты оценки</div>
-                <div class="modal-subtitle" id="modal-track-name">Трек: —</div>
-            </div>
-            <button type="button" class="modal-close-btn" id="modal-close-btn">×</button>
-        </div>
-        <div class="modal-body">
-            <div class="modal-columns">
-                <div class="modal-col">
-                    <h3 class="modal-section-title">Средний балл по параметрам</h3>
-                    <table class="stats-table" id="criteria-table">
-                        <thead>
-                            <tr>
-                                <th>Параметр</th>
-                                <th>Средний балл</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        </tbody>
-                    </table>
-        </div>
-                </div>
-                <div class="modal-col">
-                    <h3 class="modal-section-title">Оценщики</h3>
-                    <table class="stats-table" id="raters-table">
-                        <thead>
-                            <tr>
-                                <th>Оценщик</th>
-                                <th>Средний балл</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        </tbody>
-                    </table>
-        </div>
-                    <div class="modal-overall">
-                        <div class="modal-overall-label">Итоговый средний балл по треку:</div>
-
-                        <div class="modal-overall-row">
-                            <div class="modal-overall-value score-chip" id="modal-overall">0.0</div>
-                            <div class="modal-rank-pill" id="modal-top-rank"></div>
-                        </div>
-</div>
-<div class="modal-qr-block">
-                            <div class="modal-section-title">QR-код страницы трека</div>
-                            <p class="modal-qr-subtitle">
-                                Наведи камеру телефона, чтобы открыть страницу трека с другого устройства.
-                            </p>
-                            <div class="modal-qr-inner">
-                                <img id="modal-track-qr" class="modal-qr-image" src="" alt="QR трека">
-                            </div>
-                        
-                        
-                    </div>
-                </div>
-            
-            <div class="modal-meme" id="modal-meme-phrase" style="display:none;"></div>
-        </div>
-    </div>
-</div>
-
 <script>
     window.INITIAL_STATE = {{ initial_state|tojson }};
     window.USER_ROLE = {{ (session.get('role') or '')|tojson }};
     window.IS_ADMIN = {{ is_admin|tojson }};
 </script>
-
-<!-- Docked player (Yandex-style) -->
-<div class="yplayer-dock" id="yplayer-dock">
-  <div class="yplayer-dock-inner">
-    <audio id="sync-audio"
-                       class="sync-audio-hidden{% if not is_admin %} sync-audio--locked{% endif %}"
-                       preload="metadata"></audio>
-
-                <div class="yplayer" id="sync-player" role="group" aria-label="Плеер">
-                    <div class="yplayer__left">
-                        <button class="yplayer__btn yplayer__btn--play" id="player-play-btn" type="button" aria-label="Play/Pause">
-                            <span class="yplayer__icon yplayer__icon--play" id="yplayer-icon"></span>
-                        </button>
-                        <div class="yplayer__meta">
-                            <div class="yplayer__title" id="yplayer-title">—</div>
-                            <div class="yplayer__subtitle" id="yplayer-subtitle">—</div>
-                        </div>
-                    </div>
-
-                    <div class="yplayer__center">
-                        <div class="yplayer__progress" id="yplayer-progress" aria-label="Прогресс">
-                            <span class="yplayer__time" id="yplayer-time-current">0:00</span>
-                            <div class="yplayer__bar" id="yplayer-bar" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
-                                <div class="yplayer__bar-fill" id="yplayer-bar-fill"></div>
-                                <div class="yplayer__bar-handle" id="yplayer-bar-handle"></div>
-                            </div>
-                            <span class="yplayer__time" id="yplayer-time-total">0:00</span>
-                        </div>
-                    </div>
-
-                    <div class="yplayer__right">
-                        <button class="yplayer__btn" id="player-stop-btn" type="button" aria-label="Stop">■</button>
-                        <div class="yplayer__volume">
-                            <button class="yplayer__btn" id="yplayer-mute-btn" type="button" aria-label="Mute">🔊</button>
-                            <input class="yplayer__vol" id="yplayer-vol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Громкость">
-                        </div>
-                    </div>
-                </div>
-  </div>
-</div>
-
-
 
 
 <script>

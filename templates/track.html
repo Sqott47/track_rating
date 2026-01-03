@@ -8,7 +8,7 @@
         <div class="top-panel-main">
             <div class="top-panel-label">Карточка трека</div>
             <p class="top-panel-subtext">
-                Минималистичная сводка по оценкам трека и комментариям слушателей.
+                Минималистичная сводка по оценкам стримеров и рецензиям пользователей.
             </p>
             <a href="{{ url_for('top_tracks') }}" class="btn-ghost track-back-btn">
                 <span class="track-back-icon">←</span>
@@ -27,9 +27,7 @@
                     </p>
                 </div>
                 <div class="track-hero-actions">
-                    <button type="button" class="btn-primary" id="track-open-rate-btn">
-                        Оценить трек
-                    </button>
+                    {# оценки пользователей теперь привязаны к рецензиям ниже #}
                     <div class="track-share-wrapper">
                         <button type="button"
                                 class="btn-ghost track-share-trigger"
@@ -127,51 +125,22 @@
                     </div>
 
                     <div class="track-section">
-                        <h2 class="track-section-title">Параметры (зрители)</h2>
-                        <table class="stats-table">
-                            <thead>
-                                <tr>
-                                    <th>Параметр</th>
-                                    <th>Средний балл</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% if viewer_criteria_stats %}
-                                    {% for c in viewer_criteria_stats %}
-                                        <tr>
-                                            <td data-label="Параметр">
-                                                {% for key, label in CRITERIA %}
-                                                    {% if key == c.key %}
-                                                        {{ label }}
-                                                    {% endif %}
-                                                {% endfor %}
-                                            </td>
-                                            <td class="track-score-cell" data-label="Средний балл">
-                                                {% if c.avg is not none %}
-                                                    <span class="score-chip">{{ '%.2f'|format(c.avg) }}</span>
-                                                {% else %}
-                                                    ?
-                                                {% endif %}
-                                            </td>
-                                        </tr>
-                                    {% endfor %}
-                                {% else %}
-                                    <tr>
-                                        <td colspan="2"><em>Пока нет зрительских оценок.</em></td>
-                                    </tr>
-                                {% endif %}
-                            </tbody>
-                        </table>
-                        <div class="track-viewer-overall">
-                            <span class="track-viewer-label">Общий средний балл зрителей:</span>
+                        <h2 class="track-section-title">Рецензии пользователей</h2>
+                        <div class="track-viewer-overall" style="justify-content:flex-start; gap:12px; flex-wrap:wrap;">
+                            <span class="track-viewer-label">Средний балл:</span>
                             <span class="score-chip">
-                                {% if viewer_overall is not none %}
-                                    {{ '%.2f'|format(viewer_overall) }}
+                                {% if review_overall is not none %}
+                                    {{ '%.2f'|format(review_overall) }}
                                 {% else %}
                                     ?
                                 {% endif %}
                             </span>
+                            <span class="track-viewer-label" style="margin-left:6px;">Рецензий:</span>
+                            <span class="score-chip">{{ review_count }}</span>
                         </div>
+                        <p class="field-hint" style="margin-top:10px;">
+                            Одна рецензия от одного пользователя. Оценка привязана к тексту.
+                        </p>
                     </div>
                 </div>
 
@@ -212,130 +181,169 @@
         </div>
     </section>
 
-    <section class="top-list-section" id="comments">
-        <div class="top-table-card">
-            <div class="home-section-header">
-                <h2 class="home-section-title">Комментарии</h2>
+    <section class="top-list-section" id="reviews">
+    <div class="top-table-card reviews-card">
+        <div class="reviews-header">
+            <div class="reviews-header-main">
+                <h2 class="home-section-title">Рецензии</h2>
                 <p class="home-section-subtitle">
-                    Оставь своё мнение о треке. Комментарии сразу появляются под треком.
+                    1 пользователь = 1 рецензия на трек. Оценка всегда идёт вместе с текстом.
                 </p>
             </div>
+            <div class="reviews-header-stats">
+                <div class="reviews-stat">
+                    <span class="reviews-stat-label">Средний балл</span>
+                    <span class="score-chip">
+                        {% if review_overall is not none %}
+                            {{ '%.2f'|format(review_overall) }}
+                        {% else %}
+                            ?
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="reviews-stat">
+                    <span class="reviews-stat-label">Рецензий</span>
+                    <span class="score-chip">{{ review_count }}</span>
+                </div>
+            </div>
+        </div>
 
-            <form method="post" class="track-comment-form">
-                <div class="track-comment-grid">
-                    <label class="auth-field">
-                        <span>Имя (опционально)</span>
-                        <input type="text" name="author" maxlength="64" placeholder="Например: слушатель ANTIGAZ">
-                    </label>
-                    <label class="auth-field">
-                        <span>Комментарий</span>
+        {% if not current_user %}
+            <div class="reviews-empty-state">
+                <p class="field-hint">
+                    Чтобы оставить рецензию, нужно <a href="{{ url_for('login') }}" data-turbo="false">войти</a>
+                    или <a href="{{ url_for('register') }}" data-turbo="false">зарегистрироваться</a>.
+                </p>
+            </div>
+        {% elif not current_user.is_email_verified() %}
+            <div class="reviews-empty-state">
+                <p class="field-hint">
+                    Подтверди email, чтобы оставлять рецензии.
+                </p>
+                <div class="admin-actions" style="margin-top:10px;">
+                    <a href="{{ url_for('settings_profile') }}" class="btn-ghost" data-turbo="false">Перейти в профиль</a>
+                    <form method="post" action="{{ url_for('settings_email_resend') }}" style="display:inline-block;" data-turbo="false">
+                        <button type="submit" class="btn-primary">Отправить письмо ещё раз</button>
+                    </form>
+                </div>
+            </div>
+        {% else %}
+            <form method="post"
+                  action="{{ url_for('submit_review', track_id=track.id) }}"
+                  class="track-comment-form review-form">
+                <div class="review-form-top">
+                    <div class="review-form-title">
+                        <div class="review-form-title-main">Твоя рецензия</div>
+                        <div class="review-form-title-sub">
+                            Поставь оценки по критериям — общий балл посчитается автоматически.
+                        </div>
+                    </div>
+
+                    <div class="review-form-overall">
+                        <div class="review-form-overall-label">Твой общий балл</div>
+                        <div class="modal-overall-value score-chip" id="review-self-overall">0.00</div>
+                    </div>
+                </div>
+
+                <div class="track-comment-grid review-form-grid">
+                    <div class="review-sliders">
+                        {% for key, label in CRITERIA %}
+                            <div class="slider-row viewer-slider-row review-slider-row">
+                                <div class="slider-label">{{ label }}</div>
+                                <div class="slider-control">
+                                    <input type="range"
+                                           min="0" max="10" step="1"
+                                           name="score_{{ key }}"
+                                           value="{{ (my_review_score_map[key] if my_review_score_map is defined else 0) }}"
+                                           class="viewer-slider review-criterion-slider"
+                                           data-criterion="{{ key }}">
+                                    <div class="slider-value score-chip" data-criterion-value="{{ key }}">{{ (my_review_score_map[key] if my_review_score_map is defined else 0) }}</div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+
+                    <label class="auth-field review-text-field">
+                        <span>Текст</span>
                         <textarea name="text"
-                                  rows="3"
-                                  maxlength="2000"
-                                  placeholder="Что думаешь об этом треке?"></textarea>
+                                  rows="5"
+                                  maxlength="4000"
+                                  required
+                                  placeholder="Коротко: что понравилось/не понравилось и почему такая оценка…">{% if my_review %}{{ my_review.text|e }}{% endif %}</textarea>
                     </label>
                 </div>
-                <div class="admin-actions">
-                    <button type="submit" class="btn-primary">Отправить комментарий</button>
+
+                <div class="admin-actions review-form-actions">
+                    <button type="submit" class="btn-primary">
+                        {% if my_review %}Сохранить изменения{% else %}Опубликовать рецензию{% endif %}
+                    </button>
                 </div>
             </form>
+        {% endif %}
 
-            <div class="track-comments-list">
-                {% if comments %}
-                    {% for c in comments %}
-                        <article class="track-comment-item">
-                            <div class="track-comment-header">
-                                <div class="track-comment-header-main">
-                                    <span class="track-comment-author">{{ c.author_name or 'Аноним' }}</span>
-                                    <span class="track-comment-date">
-                                        {{ c.created_at.strftime('%d.%m.%Y %H:%M') if c.created_at else '' }}
-                                    </span>
+        <div class="track-comments-list reviews-list">
+            {% if reviews %}
+                {% for r in reviews %}
+                    <article class="track-comment-item track-review-card">
+                        <div class="track-comment-header review-card-header">
+                            <div class="track-comment-header-main">
+                                <span class="track-comment-author">@{{ r.user.username }}</span>
+                                <span class="track-comment-date">
+                                    {{ r.created_at.strftime('%d.%m.%Y %H:%M') if r.created_at else '' }}
+                                </span>
+                            </div>
+                            <span class="score-chip review-card-score">{{ '%.2f'|format(r.overall) }}</span>
+                        </div>
+
+                        <p class="track-comment-text review-preview">
+                            {{ r.text|truncate(220, True, '…') }}
+                        </p>
+
+                        <details class="track-review-details review-details">
+                            <summary class="track-review-summary review-details-summary">Открыть полностью</summary>
+
+                            <div class="review-details-body">
+                                <div class="review-criteria-grid">
+                                    {% for key, label in CRITERIA %}
+                                        {% set ns = namespace(v=0) %}
+                                        {% if r.scores %}
+                                            {% for s in r.scores %}
+                                                {% if s.criterion_key == key %}
+                                                    {% set ns.v = s.score %}
+                                                {% endif %}
+                                            {% endfor %}
+                                        {% endif %}
+                                        <div class="review-criteria-row">
+                                            <span class="review-criteria-label">{{ label }}</span>
+                                            <span class="score-chip review-criteria-score">{{ ns.v }}</span>
+                                        </div>
+                                    {% endfor %}
                                 </div>
-                                {% if is_admin %}
-                                <form method="post" class="track-comment-delete-form">
-                                    <input type="hidden" name="delete_comment_id" value="{{ c.id }}">
-                                    <button type="submit" class="track-comment-delete-btn" title="Скрыть комментарий">✕</button>
-                                </form>
-                                {% endif %}
+
+                                <p class="track-comment-text review-fulltext">{{ r.text }}</p>
                             </div>
-                            <p class="track-comment-text">{{ c.text }}</p>
-                        </article>
-                    {% endfor %}
-                {% else %}
-                    <p class="field-hint">Пока нет ни одного комментария. Будь первым!</p>
-                {% endif %}
-            </div>
-        </div>
-    </section>
-</div>
-
-
-<div class="modal-backdrop" id="viewer-modal-backdrop">
-    <div class="modal-card viewer-modal">
-        <div class="modal-header">
-            <div>
-                <div class="modal-title" id="viewer-modal-title">Оценка трека</div>
-                <div class="modal-subtitle" id="viewer-modal-subtitle">Выберите оценки по параметрам</div>
-            </div>
-            <button type="button" class="modal-close-btn" id="viewer-modal-close">×</button>
-        </div>
-        <div class="modal-body">
-            
-            <div class="modal-columns">
-                <div class="modal-col">
-                    <h3 class="modal-section-title">Твои оценки</h3>
-                    {% for key, label in CRITERIA %}
-                        <div class="slider-row viewer-slider-row">
-                            <div class="slider-label">{{ label }}</div>
-                            <div class="slider-control">
-                                <input type="range"
-                                       min="0" max="10" step="1" value="0"
-                                       class="viewer-slider"
-                                       data-criterion="{{ key }}">
-                                <div class="slider-value score-chip" data-criterion-value="{{ key }}">0</div>
-                            </div>
-                        </div>
-                    {% endfor %}
-
-                    <div class="modal-overall viewer-self-overall">
-                        <div class="modal-overall-label">Твой текущий общий балл:</div>
-                        <div class="modal-overall-row">
-                            <div class="modal-overall-value score-chip" id="viewer-self-overall">0.0</div>
-                        </div>
-                    </div>
+                        </details>
+                    </article>
+                {% endfor %}
+            {% else %}
+                <div class="reviews-empty-state">
+                    <p class="field-hint">Пока нет ни одной рецензии. Будь первым!</p>
                 </div>
-                <div class="modal-col">
-                    <h3 class="modal-section-title">Средний балл зрителей</h3>
-                    <div class="modal-overall">
-                        <div class="modal-overall-label">По версии чата:</div>
-                        <div class="modal-overall-row">
-                            <div class="modal-overall-value score-chip" id="viewer-modal-overall">0.00</div>
-                        </div>
-                    </div>
-                    <div class="viewer-message viewer-message--thanks" id="viewer-thanks" style="display:none;">
-                        Спасибо за оценку, GAZ!
-                    </div>
-                    <div class="viewer-message viewer-message--already" id="viewer-already" style="display:none;">
-                        Ты уже оценивал этот трек.
-                    </div>
-                </div>
-            </div>
-</div>
-
-            <div class="modal-footer">
-                <button class="btn-primary" id="viewer-submit-btn">Оценить трек</button>
-            </div>
+            {% endif %}
         </div>
     </div>
+</section>
 </div>
+
 
 {% endblock %}
 
 {% block scripts %}
     {{ super() }}
-    <script src="{{ url_for('static', filename='js/viewers.js') }}"></script>
 <script>
-document.addEventListener("DOMContentLoaded", function () {
+// Turbo-safe init for Track page actions
+(function () {
+  function initTrackPage() {
     var overallEl = document.getElementById("track-page-overall");
     if (overallEl) {
         var val = parseFloat(overallEl.textContent.replace(",", "."));
@@ -344,12 +352,34 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
-    // Открыть модалку зрительской оценки прямо на странице трека
-    var rateBtn = document.getElementById("track-open-rate-btn");
-    if (rateBtn && window.openViewerRatingModal) {
-        rateBtn.addEventListener("click", function () {
-            window.openViewerRatingModal({{ track.id }});
+    // Оценки в форме рецензии (по критериям)
+    var overallChip = document.getElementById("review-self-overall");
+    var sliders = Array.prototype.slice.call(document.querySelectorAll(".review-criterion-slider"));
+    if (sliders.length && overallChip) {
+        function computeOverall() {
+            var sum = 0;
+            sliders.forEach(function (sl) {
+                var v = parseInt(sl.value || "0", 10);
+                if (!isNaN(v)) sum += v;
+            });
+            var overall = sliders.length ? (sum / sliders.length) : 0;
+            overallChip.textContent = overall.toFixed(2);
+            if (typeof window.applyHeatToChip === "function") {
+                window.applyHeatToChip(overallChip, overall);
+            }
+        }
+        sliders.forEach(function (sl) {
+            if (sl.dataset.bound) return;
+            sl.dataset.bound = "1";
+            var crit = sl.getAttribute("data-criterion");
+            var chip = document.querySelector('[data-criterion-value="' + crit + '"]');
+            var sync = function () {
+                if (chip) chip.textContent = sl.value;
+                computeOverall();
+            };
+            sl.addEventListener("input", sync);
         });
+        computeOverall();
     }
 
     // Поповер шаринга
@@ -361,19 +391,35 @@ document.addEventListener("DOMContentLoaded", function () {
             var isOpen = popover.classList.toggle("is-open");
             shareBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
         }
-        shareBtn.addEventListener("click", function (e) {
-            e.stopPropagation();
-            togglePopover();
-        });
-        document.addEventListener("click", function () {
-            popover.classList.remove("is-open");
-            shareBtn.setAttribute("aria-expanded", "false");
-        });
-        popover.addEventListener("click", function (e) {
-            e.stopPropagation();
-        });
+        if (!shareBtn.dataset.bound) {
+            shareBtn.dataset.bound = "1";
+            shareBtn.addEventListener("click", function (e) {
+                e.stopPropagation();
+                togglePopover();
+            });
+        }
+
+        // One global document click handler (Turbo keeps the document)
+        if (!window.__TRACK_SHARE_DOC_BOUND__) {
+            window.__TRACK_SHARE_DOC_BOUND__ = true;
+            document.addEventListener("click", function () {
+                var p = document.getElementById("track-share-popover");
+                var b = document.getElementById("track-share-btn");
+                if (p) p.classList.remove("is-open");
+                if (b) b.setAttribute("aria-expanded", "false");
+            });
+        }
+
+        if (!popover.dataset.bound) {
+            popover.dataset.bound = "1";
+            popover.addEventListener("click", function (e) {
+                e.stopPropagation();
+            });
+        }
 
         Array.prototype.slice.call(popover.querySelectorAll(".track-share-option")).forEach(function (btn) {
+            if (btn.dataset.bound) return;
+            btn.dataset.bound = "1";
             btn.addEventListener("click", function () {
                 var kind = btn.getAttribute("data-share-kind");
                 var urlEnc = encodeURIComponent(shareUrl);
@@ -396,6 +442,10 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         });
     }
-});
+  }
+
+  // Run once on initial load and on Turbo navigations.
+  document.addEventListener("turbo:load", initTrackPage);
+})();
 </script>
 {% endblock %}

@@ -61,6 +61,11 @@
     }
 
     function togglePlay() {
+      // If user is in synced rating session, forbid local playback.
+      if (typeof window !== "undefined" && window.__IN_RATING__) {
+        alert("Вы участвуете в оценке. Покиньте оценку, чтобы слушать другие треки.");
+        return;
+      }
       if (audio.paused) {
         var p = audio.play();
         if (p && typeof p.catch === "function") p.catch(function () {});
@@ -131,10 +136,19 @@
     setPlayingUi(false);
   }
 
-  document.addEventListener("DOMContentLoaded", function () {
+  function initAll() {
     var nodes = document.querySelectorAll("[data-yplayer-embed]");
     for (var i = 0; i < nodes.length; i++) {
+      // Prevent double-init on the same node.
+      if (nodes[i].__yplayerInited) continue;
+      nodes[i].__yplayerInited = true;
       initOne(nodes[i]);
     }
-  });
+  }
+
+  // Expose for Turbo navigation.
+  try { window.initYplayerEmbeds = initAll; } catch (e) {}
+
+  // turbo:load fires on initial page load and after every Turbo visit.
+  document.addEventListener("turbo:load", initAll);
 })();

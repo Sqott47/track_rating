@@ -454,28 +454,37 @@
 </style>
 
 <script>
-    document.addEventListener("DOMContentLoaded", function () {
-        var tabButtons = document.querySelectorAll(".admin-tab");
-        var panels = document.querySelectorAll(".admin-section");
-        if (!tabButtons.length || !panels.length) return;
+    (function () {
+        function initAdminTabsInline() {
+            var root = document.querySelector(".admin-tabs");
+            if (!root) return;
+            if (root.dataset.bound) return;
+            root.dataset.bound = "1";
 
-        tabButtons.forEach(function (btn) {
-            btn.addEventListener("click", function () {
-                var target = btn.getAttribute("data-admin-tab");
-                if (!target) return;
+            var tabButtons = document.querySelectorAll(".admin-tab");
+            var panels = document.querySelectorAll(".admin-section");
+            if (!tabButtons.length || !panels.length) return;
 
-                tabButtons.forEach(function (b) {
-                    b.classList.toggle("admin-tab--active", b === btn);
-                });
+            tabButtons.forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    var target = btn.getAttribute("data-admin-tab");
+                    if (!target) return;
 
-                panels.forEach(function (p) {
-                    var panelKey = p.getAttribute("data-admin-section");
-                    var isActive = panelKey === target;
-                    p.classList.toggle("admin-section--active", isActive);
+                    tabButtons.forEach(function (b) {
+                        b.classList.toggle("admin-tab--active", b === btn);
+                    });
+
+                    panels.forEach(function (p) {
+                        var panelKey = p.getAttribute("data-admin-section");
+                        var isActive = panelKey === target;
+                        p.classList.toggle("admin-section--active", isActive);
+                    });
                 });
             });
-        });
-    });
+        }
+
+        document.addEventListener("turbo:load", initAdminTabsInline);
+    })();
 </script>
 
 {% endblock %}

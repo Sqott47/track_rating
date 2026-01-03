@@ -41,7 +41,7 @@
                                             sort_by='viewers',
                                             direction=('asc' if sort_by == 'viewers' and direction == 'desc' else 'desc')) }}"
                            class="top-sort-header-link">
-                            <span>Средний балл зрителей</span>
+                            <span>Средний балл пользователей</span>
                             {% if sort_by == 'viewers' %}
                                 <span class="top-sort-arrow">
                                     {% if direction == 'asc' %}▲{% else %}▼{% endif %}
@@ -85,7 +85,7 @@
                                 {% endif %}
                             </span>
                         </td>
-                        <td data-label="Средний балл зрителей">
+                        <td data-label="Средний балл пользователей">
                             <span class="top-score-chip top-score-chip-viewer score-chip">
                                 {% if t.avg_viewers is not none %}
                                     {{ "%.2f"|format(t.avg_viewers) }}
@@ -144,8 +144,8 @@
                     </table>
                 </div>
                 <div class="modal-col">
-                    <h3 class="modal-section-title">Средний балл зрителей по параметрам</h3>
-                    <table class="stats-table">
+                    <h3 class="modal-section-title">Средний балл пользователей</h3>
+                    <table class="stats-table" style="display:none;">
                         <thead>
                             <tr>
                                 <th>Параметр</th>
@@ -155,7 +155,7 @@
                         <tbody id="track-modal-viewers-criteria-body"></tbody>
                     </table>
                     <div class="modal-overall">
-                        <div class="modal-overall-label">Итоговый средний балл зрителей:</div>
+                        <div class="modal-overall-label">Итоговый средний балл по рецензиям:</div>
                         <div class="modal-overall-row">
                             <div class="modal-overall-value score-chip" id="track-modal-viewers-overall">?</div>
                         </div>

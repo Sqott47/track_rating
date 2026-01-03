@@ -6,9 +6,13 @@
 <div class="center-page">
     <section class="auth-card">
         <h1 class="auth-title">Вход</h1>
-        <p class="auth-subtitle">Пока что данная страница только для админов сайта, следите за обновлениями</p>
+        <p class="auth-subtitle">Войди в аккаунт, чтобы оставлять рецензии и оценки.</p>
 
-        <form method="post" class="auth-form">
+        {#
+          ВАЖНО: login/logout должны быть вне Turbo.
+          Иначе Socket.IO может остаться подключенным как «аноним» до полного reload.
+        #}
+        <form method="post" action="{{ url_for('login') }}" class="auth-form" data-turbo="false">
             <label class="auth-field">
                 <span>Логин</span>
                 <input type="text" name="username" autocomplete="username" required>
@@ -20,6 +24,11 @@
             <button type="submit" class="btn-primary auth-btn">Войти</button>
             <div class="auth-hint">
                 Без правильного логина и пароля доступ к слайдерам закрыт.
+            </div>
+            <div class="auth-links">
+                <a href="{{ url_for('forgot_password') }}">Забыли пароль?</a>
+                <span>·</span>
+                <a href="{{ url_for('register') }}" data-turbo="false">Регистрация</a>
             </div>
         </form>
     </section>

@@ -259,15 +259,6 @@
     </section>
 </div>
 
-{# Лайтбокс для предпросмотра фото-вложений в новостях #}
-<div class="img-lightbox" id="img-lightbox" aria-hidden="true">
-    <div class="img-lightbox__backdrop" data-close="1"></div>
-    <div class="img-lightbox__dialog" role="dialog" aria-modal="true">
-        <button type="button" class="img-lightbox__close" id="img-lightbox-close" aria-label="Закрыть">×</button>
-        <img class="img-lightbox__img" id="img-lightbox-img" src="" alt="">
-    </div>
-</div>
-
 {# Модалка с деталями по треку такая же, как на странице топа #}
 <div class="modal-backdrop" id="track-modal-backdrop">
     <div class="modal-card">
@@ -293,18 +284,12 @@
                     </table>
                 </div>
                 <div class="modal-col">
-                    <h3 class="modal-section-title">Средний балл зрителей по параметрам</h3>
-                    <table class="stats-table">
-                        <thead>
-                            <tr>
-                                <th>Параметр</th>
-                                <th>Средний балл</th>
-                            </tr>
-                        </thead>
+                    <h3 class="modal-section-title">Средний балл пользователей</h3>
+                    <table class="stats-table" style="display:none;">
                         <tbody id="track-modal-viewers-criteria-body"></tbody>
                     </table>
                     <div class="modal-overall">
-                        <div class="modal-overall-label">Итоговый средний балл зрителей:</div>
+                        <div class="modal-overall-label">Итоговый средний балл по рецензиям:</div>
                         <div class="modal-overall-row">
                             <div class="modal-overall-value score-chip" id="track-modal-viewers-overall">?</div>
                         </div>
@@ -340,57 +325,3 @@
 
 {% endblock %}
 
-{% block scripts %}
-    {{ super() }}
-    <script>
-        (function () {
-            const lightbox = document.getElementById('img-lightbox');
-            const img = document.getElementById('img-lightbox-img');
-            const closeBtn = document.getElementById('img-lightbox-close');
-            if (!lightbox || !img || !closeBtn) return;
-
-            function openLightbox(src, alt) {
-                img.src = src;
-                img.alt = alt || '';
-                lightbox.classList.add('is-open');
-                lightbox.setAttribute('aria-hidden', 'false');
-                document.body.style.overflow = 'hidden';
-            }
-
-            function closeLightbox() {
-                lightbox.classList.remove('is-open');
-                lightbox.setAttribute('aria-hidden', 'true');
-                img.src = '';
-                document.body.style.overflow = '';
-            }
-
-            // Open on click for any image attachment
-            document.addEventListener('click', function (e) {
-                const btn = e.target.closest('.js-image-preview');
-                if (!btn) return;
-                const src = btn.getAttribute('data-src');
-                const alt = btn.getAttribute('data-alt');
-                if (!src) return;
-                e.preventDefault();
-                openLightbox(src, alt);
-            });
-
-            // Close via X
-            closeBtn.addEventListener('click', closeLightbox);
-
-            // Close via click on backdrop/outside dialog
-            lightbox.addEventListener('click', function (e) {
-                if (e.target && (e.target.getAttribute('data-close') === '1' || e.target === lightbox)) {
-                    closeLightbox();
-                }
-            });
-
-            // Close via ESC
-            document.addEventListener('keydown', function (e) {
-                if (e.key === 'Escape' && lightbox.classList.contains('is-open')) {
-                    closeLightbox();
-                }
-            });
-        })();
-    </script>
-{% endblock %}

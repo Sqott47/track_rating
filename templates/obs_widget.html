@@ -147,6 +147,23 @@
                 setStatus("Ошибка подключения к Socket.IO");
             });
 
+// Live mode: update widget when the currently playing track changes (so viewers can scan QR immediately).
+socket.on("live_track_changed", function (payload) {
+    console.log("[OBS widget] live_track_changed", payload);
+    if (!payload) return;
+
+    if (payload.track_name && nameEl) {
+        nameEl.textContent = "Сейчас играет: " + payload.track_name;
+    }
+    if (payload.qr_url && qrEl) {
+        qrEl.src = payload.qr_url;
+    } else if (qrEl) {
+        qrEl.removeAttribute("src");
+    }
+
+    setStatus("Лайв‑режим: трек обновлён.");
+});
+
             socket.on("evaluation_result", function (payload) {
                 console.log("[OBS widget] evaluation_result", payload);
                 if (!payload) return;

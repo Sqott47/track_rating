@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}Профиль{% endblock %}
+
+{% block content %}
+<div class="page">
+  <div class="panel">
+    <h1 class="page-title">Настройки</h1>
+<div class="settings-tabs">
+      <a class="settings-tab is-active" href="{{ url_for('settings_profile') }}">Профиль</a>
+      <a class="settings-tab" href="{{ url_for('settings_security') }}">Безопасность</a>
+    </div>
+
+    <section class="profile-card">
+      <div class="profile-card__title">Аккаунт</div>
+
+      <div class="profile-kv">
+        <div class="profile-kv__row">
+          <div class="profile-kv__key">Логин</div>
+          <div class="profile-kv__val"><code>@{{ current_user.username|e }}</code></div>
+        </div>
+
+        <div class="profile-kv__row">
+          <div class="profile-kv__key">Роль</div>
+          <div class="profile-kv__val">
+            <span class="role-pill role-pill--{{ current_user.role|e }}">
+              {% if current_user.role == 'judge' %}
+                Оценщик
+              {% elif current_user.role == 'superadmin' %}
+                Главный админ
+              {% elif current_user.role == 'admin' %}
+                Админ
+              {% else %}
+                Пользователь
+              {% endif %}
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <form method="post" action="{{ url_for('settings_profile') }}" class="form">
+      <div class="form-row">
+        <label class="form-label" for="display_name">Отображаемое имя</label>
+        <input
+          id="display_name"
+          name="display_name"
+          class="form-input"
+          type="text"
+          maxlength="30"
+          value="{{ (request.form.get('display_name') if request.method == 'POST' else (current_user.display_name or current_user.username))|e }}"
+          autocomplete="nickname"
+          required
+        />
+        {% if errors and errors.get('display_name') %}
+          <div class="form-error">{{ errors.get('display_name') }}</div>
+        {% endif %}
+        <div class="form-hint">Это имя будет видно на сайте (комменты/оценки и т.д.).</div>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">Сохранить</button>
+      </div>
+    </form>
+
+    <hr class="divider"/>
+
+    <h2 class="section-title">Email</h2>
+    <p class="section-subtitle">Нужен для подтверждения аккаунта и восстановления пароля.</p>
+
+    <form method="post" action="{{ url_for('settings_email') }}" class="form">
+      <div class="form-row">
+        <label class="form-label" for="email">Email</label>
+        <input
+          id="email"
+          name="email"
+          class="form-input"
+          type="email"
+          maxlength="255"
+          value="{{ (email_form_value if email_form_value is defined else (request.form.get('email') if request.method == 'POST' else (current_user.email or ''))) |e }}"
+          autocomplete="email"
+          required
+        />
+        {% if errors and errors.get('email') %}
+          <div class="form-error">{{ errors.get('email') }}</div>
+        {% endif %}
+
+        {% if current_user.email %}
+          {% if current_user.is_email_verified() %}
+            <div class="badge badge-ok">Подтверждён</div>
+          {% else %}
+            <div class="badge badge-warn">Не подтверждён</div>
+          {% endif %}
+        {% endif %}
+      </div>
+
+      <div class="form-actions">
+        {% if current_user.email and current_user.is_email_verified() %}
+          <button type="submit" class="btn-primary">Сохранить</button>
+          <div class="form-hint">Email уже подтверждён — повторная отправка не требуется.</div>
+        {% else %}
+          <button type="submit" class="btn-primary">Сохранить и отправить подтверждение</button>
+        {% endif %}
+      </div>
+    </form>
+
+    {% if current_user.email and not current_user.is_email_verified() %}
+      <form method="post" action="{{ url_for('settings_email_resend') }}" class="form form-compact">
+        <div class="form-actions">
+          <button type="submit" class="btn-secondary">Отправить письмо ещё раз</button>
+        </div>
+      </form>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

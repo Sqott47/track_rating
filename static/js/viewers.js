@@ -146,6 +146,8 @@ function hideAllToasts() {
 
     function attachSliderHandlers() {
         $all(".viewer-slider").forEach(function (s) {
+            if (s.dataset.bound) return;
+            s.dataset.bound = "1";
             s.addEventListener("input", function () {
                 var key = s.dataset.criterion;
                 var v = s.value;
@@ -261,10 +263,12 @@ function sendRating() {
             });
     }
 
-    document.addEventListener("DOMContentLoaded", function () {
+    function initViewersUI() {
         attachSliderHandlers();
 
-                $all(".viewer-track-row").forEach(function (row) {
+        $all(".viewer-track-row").forEach(function (row) {
+            if (row.dataset.bound) return;
+            row.dataset.bound = "1";
             row.addEventListener("click", function () {
                 var id = row.getAttribute("data-track-id");
                 if (!id) return;
@@ -292,11 +296,13 @@ function sendRating() {
         }
 
         var closeBtn = $("#viewer-modal-close");
-        if (closeBtn) {
+        if (closeBtn && !closeBtn.dataset.bound) {
+            closeBtn.dataset.bound = "1";
             closeBtn.addEventListener("click", closeModal);
         }
         var backdrop = $("#viewer-modal-backdrop");
-        if (backdrop) {
+        if (backdrop && !backdrop.dataset.bound) {
+            backdrop.dataset.bound = "1";
             backdrop.addEventListener("click", function (e) {
                 if (e.target === backdrop) {
                     closeModal();
@@ -305,8 +311,13 @@ function sendRating() {
         }
 
         var submitBtn = $("#viewer-submit-btn");
-        if (submitBtn) {
+        if (submitBtn && !submitBtn.dataset.bound) {
+            submitBtn.dataset.bound = "1";
             submitBtn.addEventListener("click", sendRating);
         }
-    });
+    }
+
+    // Turbo-safe init: Turbo fires `turbo:load` on the initial page load and on visits.
+    // Avoid DOMContentLoaded handlers to prevent missing inits on Turbo navigations.
+    document.addEventListener("turbo:load", initViewersUI);
 })();

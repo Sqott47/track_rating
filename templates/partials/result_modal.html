@@ -1,0 +1,59 @@
+<!-- Track details / results modal (used across multiple pages: Home, Top, Panel, etc.) -->
+<div class="modal-backdrop" id="result-modal-backdrop">
+    <div class="modal-card">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title">Результаты оценки</div>
+                <div class="modal-subtitle" id="modal-track-name">Трек: —</div>
+            </div>
+            <button type="button" class="modal-close-btn" id="modal-close-btn">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="modal-columns">
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Средний балл по параметрам</h3>
+                    <table class="stats-table" id="criteria-table">
+                        <thead>
+                            <tr>
+                                <th>Параметр</th>
+                                <th>Средний балл</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <div class="modal-col">
+                    <h3 class="modal-section-title">Оценщики</h3>
+                    <table class="stats-table" id="raters-table">
+                        <thead>
+                            <tr>
+                                <th>Оценщик</th>
+                                <th>Средний балл</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+
+                    <div class="modal-overall">
+                        <div class="modal-overall-label">Итоговый средний балл по треку:</div>
+                        <div class="modal-overall-row">
+                            <div class="modal-overall-value score-chip" id="modal-overall">0.0</div>
+                            <div class="modal-rank-pill" id="modal-top-rank"></div>
+                        </div>
+                    </div>
+
+                    <div class="modal-qr-block">
+                        <div class="modal-section-title">QR-код страницы трека</div>
+                        <p class="modal-qr-subtitle">Наведи камеру телефона, чтобы открыть страницу трека с другого устройства.</p>
+                        <div class="modal-qr-inner">
+                            <img id="modal-track-qr" class="modal-qr-image" src="" alt="QR трека">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-meme" id="modal-meme-phrase" style="display:none;"></div>
+        </div>
+    </div>
+</div>

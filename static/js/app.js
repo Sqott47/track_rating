@@ -7,24 +7,37 @@ var queueUIBusyTimer = null;
 var pendingQueuePayload = null;
 (function () {
     var socket = null;
+    var socketInited = false;
 
     var state = {
         track_name: "",
         raters: {},
         criteria: []
     };
+    // Map rater_id -> user_id (used for admin kick button; some server snapshots may omit user_id in rater payload)
+    window.__RATER_USER_MAP__ = window.__RATER_USER_MAP__ || {};
 
     // Очередь треков + синхро‑плеер (используется только на /panel)
     var queueState = { items: [], counts: {} };
     var playbackState = { active: null, playback: { is_playing: false, position_ms: 0 } };
 
-    var isAdmin = !!(window && window.IS_ADMIN);
+    // NOTE: this file is cached by Turbo Drive; keep admin flag in sync
+    // with server-rendered value on each visit.
+    var isAdmin = !!(window && window.__IS_ADMIN__);
+    // Queue moderation is allowed for judges and admins.
+    var canQueueModerate = !!(window && window.__IS_JUDGE__) || isAdmin;
     var isPanelPage = false;
     // Публичная страница очереди /queue (без сокет‑доступа), обновляем через /api/queue.
     var isQueuePublicPage = false;
 
+    // Polling timer for /queue (must be single instance across Turbo navigations).
+    var queuePublicPollIntervalId = null;
+
     var audioEl = null;
     var applyingRemoteAudio = false;
+
+    // Rating membership: when true, this client must stay synced and cannot play local tracks.
+    window.__IN_RATING__ = !!window.__IN_RATING__;
 
     function clamp(value, min, max) {
         return Math.min(max, Math.max(min, value));
@@ -141,6 +154,34 @@ function applyHeatToChip(el, score) {
 
     
 
+function applyHeatToAllScoreChips(rootEl) {
+    try {
+        var root = rootEl || document;
+        var chips = root.querySelectorAll ? root.querySelectorAll(".score-chip") : [];
+        chips.forEach(function (chip) {
+            // Ensure number text is wrapped so the flame (pseudo-element) stays under the digits.
+            if (!chip.querySelector(".score-chip-label")) {
+                var rawText = (chip.textContent || "").trim();
+                chip.textContent = "";
+                var inner = document.createElement("span");
+                inner.className = "score-chip-label";
+                inner.textContent = rawText;
+                chip.appendChild(inner);
+            }
+
+            var label = chip.querySelector(".score-chip-label");
+            var txt = (label && label.textContent ? label.textContent : (chip.textContent || ""))
+                .replace(",", ".")
+                .trim();
+            var val = parseFloat(txt);
+            if (!isNaN(val)) {
+                applyHeatToChip(chip, val);
+            }
+        });
+    } catch (e) {}
+}
+
+
 function applyHeatToSlider(slider, score) {
     if (!slider) return;
     var v = clamp(Number(score) || 0, 0, 10);
@@ -230,6 +271,10 @@ function updateTrackNameDisplays(name) {
         panel.className = "rating-panel";
         panel.dataset.raterId = rater.id;
 
+        var myRaterId = (window.__MY_RATER_ID__ != null) ? String(window.__MY_RATER_ID__) : null;
+        var editable = !!(window.__IN_RATING__ && myRaterId && String(rater.id) === myRaterId);
+        if (!editable) { panel.classList.add('rating-panel--readonly'); }
+
         var inner = document.createElement("div");
         inner.className = "panel-inner";
         panel.appendChild(inner);
@@ -243,19 +288,42 @@ function updateTrackNameDisplays(name) {
         header.appendChild(headerTop);
 
 
-        var removeBtn = document.createElement("button");
-        removeBtn.type = "button";
-        removeBtn.className = "panel-remove-btn";
-        removeBtn.textContent = "×";
-        removeBtn.title = "Удалить оценщика";
-        headerTop.appendChild(removeBtn);
+        // Header actions (admin kick)
+        var headerActions = document.createElement("div");
+        headerActions.className = "panel-header-actions";
+        headerTop.appendChild(headerActions);
 
-        removeBtn.addEventListener("click", function () {
-            if (socket) {
-                socket.emit("remove_rater", { rater_id: rater.id });
-            }
-        });
+        var isAdmin = !!window.__IS_ADMIN__;
+        var myUserId = (window.__USER_ID__ != null) ? String(window.__USER_ID__) : null;
+        var targetUserId = null;
+        if (rater && rater.user_id != null) {
+            targetUserId = String(rater.user_id);
+        } else if (window.__RATER_USER_MAP__ && window.__RATER_USER_MAP__[String(rater.id)] != null) {
+            targetUserId = String(window.__RATER_USER_MAP__[String(rater.id)]);
+        }
 
+        // Kick button: shown on every panel. Only admins can actually kick.
+        var canKick = true;
+        if (canKick) {
+            var kickBtn = document.createElement("button");
+            kickBtn.type = "button";
+            kickBtn.className = "btn-danger btn-xs btn-kick-rater";
+            kickBtn.textContent = "✕";
+            kickBtn.setAttribute("data-rater-id", String(rater.id));
+            if (targetUserId) kickBtn.setAttribute("data-user-id", String(targetUserId));
+            // Inline fallback to guarantee the click is handled even if other scripts swallow events.
+            // NOTE: some UI code navigates on pointerdown, so we also hook pointerdown.
+            kickBtn.setAttribute("onclick", "window.kickRaterFromBtn && window.kickRaterFromBtn(this, event); return false;");
+            kickBtn.setAttribute("onpointerdown", "window.kickRaterFromBtn && window.kickRaterFromBtn(this, event); return false;");
+            // Direct listener as a final fallback (some pages attach handlers on pointerdown
+            // and swallow bubbling/click; capturing ensures we still get the event).
+            try {
+                kickBtn.addEventListener("pointerdown", function (ev) {
+                    kickRaterFromBtn(kickBtn, ev);
+                }, true);
+            } catch (e) {}
+            headerActions.appendChild(kickBtn);
+        }
         var trackLine = document.createElement("div");
         trackLine.className = "track-title-line";
         header.appendChild(trackLine);
@@ -285,14 +353,8 @@ function updateTrackNameDisplays(name) {
         rnInput.value = rater.name || "";
         raterName.appendChild(rnInput);
 
-        rnInput.addEventListener("change", function () {
-            if (socket) {
-                socket.emit("change_rater_name", {
-                    rater_id: rater.id,
-                    name: rnInput.value
-                });
-            }
-        });
+        rnInput.disabled = true;
+        rnInput.readOnly = true;
 
         var body = document.createElement("div");
         body.className = "panel-body";
@@ -318,6 +380,8 @@ function updateTrackNameDisplays(name) {
             slider.max = "10";
             slider.step = "1";
             slider.className = "score-slider";
+            slider.disabled = !editable;
+            if (!editable) { slider.title = "Можно менять только свой слот"; }
             var v = (rater.scores && Object.prototype.hasOwnProperty.call(rater.scores, criterion.key))
                 ? Number(rater.scores[criterion.key] || 0)
                 : 0;
@@ -334,7 +398,10 @@ function updateTrackNameDisplays(name) {
             applyHeatToSlider(slider, v);
             applyHeatToChip(valueBox, v);
 
+            slider.disabled = !editable;
+
             slider.addEventListener("input", function () {
+                if (!editable) return;
                 var newVal = Number(slider.value) || 0;
                 valueBox.textContent = String(newVal);
                 applyHeatToSlider(slider, newVal);
@@ -563,6 +630,76 @@ function initModalHandlers() {
         });
     }
 
+    function initImageLightbox() {
+        // Use event delegation so it works after Turbo navigation.
+        if (window.__imageLightboxDelegated) return;
+        window.__imageLightboxDelegated = true;
+
+        function getLightbox() {
+            return {
+                root: document.getElementById("img-lightbox"),
+                img: document.getElementById("img-lightbox-img"),
+                close: document.getElementById("img-lightbox-close")
+            };
+        }
+
+        function open(src, alt) {
+            var lb = getLightbox();
+            if (!lb.root || !lb.img) return;
+            lb.img.src = src;
+            lb.img.alt = alt || "";
+            lb.root.classList.add("is-open");
+            lb.root.setAttribute("aria-hidden", "false");
+            try { document.body.style.overflow = "hidden"; } catch (e) {}
+        }
+
+        function close() {
+            var lb = getLightbox();
+            if (!lb.root || !lb.img) return;
+            lb.root.classList.remove("is-open");
+            lb.root.setAttribute("aria-hidden", "true");
+            lb.img.src = "";
+            try { document.body.style.overflow = ""; } catch (e) {}
+        }
+
+        document.addEventListener("click", function (e) {
+            var btn = e.target && e.target.closest ? e.target.closest(".js-image-preview") : null;
+            if (btn) {
+                var src = btn.getAttribute("data-src");
+                var alt = btn.getAttribute("data-alt") || "";
+                if (src) {
+                    e.preventDefault();
+                    open(src, alt);
+                    return;
+                }
+            }
+
+            var lb = getLightbox();
+            if (lb.root && lb.root.classList.contains("is-open")) {
+                if (e.target === lb.root || (e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "1")) {
+                    close();
+                }
+            }
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "Escape") {
+                var lb = getLightbox();
+                if (lb.root && lb.root.classList.contains("is-open")) close();
+            }
+        });
+
+        // Close button
+        document.addEventListener("click", function (e) {
+            var lb = getLightbox();
+            if (!lb.root) return;
+            if (e.target && lb.close && e.target === lb.close) {
+                close();
+            }
+        });
+    }
+
+
     function initTrackInput() {
         var input = document.getElementById("track-name-input");
         if (!input) return;
@@ -584,17 +721,24 @@ function initModalHandlers() {
     }
 
     function initControls() {
-        var addBtn = document.getElementById("add-rater-btn");
-        if (addBtn) {
-            addBtn.addEventListener("click", function () {
-                if (socket) {
-                    socket.emit("add_rater");
-                }
+        var joinBtn = document.getElementById("join-rating-btn");
+        if (joinBtn && !joinBtn.dataset.bound) {
+            joinBtn.dataset.bound = "1";
+            joinBtn.addEventListener("click", function () {
+                if (socket) socket.emit("join_rating");
+            });
+        }
+        var leaveBtn = document.getElementById("leave-rating-btn");
+        if (leaveBtn && !leaveBtn.dataset.bound) {
+            leaveBtn.dataset.bound = "1";
+            leaveBtn.addEventListener("click", function () {
+                if (socket) socket.emit("leave_rating");
             });
         }
 
         var evalBtn = document.getElementById("evaluate-btn");
-        if (evalBtn) {
+        if (evalBtn && !evalBtn.dataset.bound) {
+            evalBtn.dataset.bound = "1";
             evalBtn.addEventListener("click", function () {
                 if (socket) {
                     socket.emit("evaluate");
@@ -603,7 +747,8 @@ function initModalHandlers() {
         }
 
         var newTrackBtn = document.getElementById("new-track-btn");
-        if (newTrackBtn) {
+        if (newTrackBtn && !newTrackBtn.dataset.bound) {
+            newTrackBtn.dataset.bound = "1";
             newTrackBtn.addEventListener("click", function () {
                 if (socket) {
                     socket.emit("reset_state");
@@ -621,7 +766,18 @@ function initModalHandlers() {
     }
 
 
-    function getSyncAudioEl() {
+    
+    function stopSyncAudio() {
+        var a = getSyncAudioEl();
+        if (!a) return;
+        try { applyingRemoteAudio = true; } catch (e) {}
+        try { a.pause(); } catch (e) {}
+        try { a.currentTime = 0; } catch (e) {}
+        try { a.removeAttribute("src"); a.load(); } catch (e) {}
+        try { applyingRemoteAudio = false; } catch (e) {}
+    }
+
+function getSyncAudioEl() {
         if (audioEl) return audioEl;
         audioEl = document.getElementById("sync-audio");
         return audioEl;
@@ -697,7 +853,7 @@ if (queueUIBusy) {
             var actions = document.createElement("div");
             actions.className = "queue-item-actions";
 
-            if (isAdmin) {
+            if (canQueueModerate) {
                 // приоритет
                 var sel = document.createElement("select");
                 sel.className = "queue-priority-select";
@@ -744,6 +900,19 @@ if (queueUIBusy) {
                     socket.emit("admin_delete_submission", { submission_id: item.id });
                 });
                 actions.appendChild(delBtn);
+
+                // 🔧 Debug: quick link to the generated track page (opens in new tab)
+                // Available for judge/admin only (same as canQueueModerate).
+                if (item.linked_track_id) {
+                    var trackLink = document.createElement("a");
+                    trackLink.href = "/track/" + String(item.linked_track_id);
+                    trackLink.target = "_blank";
+                    trackLink.rel = "noopener";
+                    trackLink.className = "queue-debug-link";
+                    trackLink.title = "Открыть страницу трека";
+                    trackLink.textContent = "↗";
+                    actions.appendChild(trackLink);
+                }
             }
 
             row.appendChild(actions);
@@ -840,6 +1009,9 @@ if (queueUIBusy) {
         var a = getSyncAudioEl();
         if (!a) return;
 
+        // Show/hide the global dock depending on whether there is an active synced track.
+        var dock = document.getElementById("yplayer-dock");
+
         playbackState = payload || playbackState;
 
         var active = payload && payload.active ? payload.active : null;
@@ -896,6 +1068,7 @@ if (queueUIBusy) {
 
         // если активного трека нет — сбрасываем
         if (!active || !active.audio_url) {
+            if (dock) dock.style.display = "none";
             try {
                 applyingRemoteAudio = true;
                 a.pause();
@@ -907,6 +1080,8 @@ if (queueUIBusy) {
             }
             return;
         }
+
+        if (dock) dock.style.display = "block";
 
         var desiredSrc = active.audio_url;
         var needsReload = (a.getAttribute("src") !== desiredSrc);
@@ -985,7 +1160,8 @@ if (queueUIBusy) {
 
         // Кнопка "Включить звук" для оценщиков (из-за autoplay policy)
         var unlock = document.getElementById("unlock-audio-btn");
-        if (unlock) {
+        if (unlock && unlock.dataset.bound !== "1") {
+            unlock.dataset.bound = "1";
             unlock.addEventListener("click", function () {
                 var warn = document.getElementById("sync-audio-warning");
                 if (warn) warn.style.display = "none";
@@ -1013,7 +1189,8 @@ if (queueUIBusy) {
         }
 
         var playBtn = document.getElementById("player-play-btn");
-        if (playBtn) {
+        if (playBtn && playBtn.dataset.bound !== "1") {
+            playBtn.dataset.bound = "1";
             playBtn.addEventListener("click", function () {
                 // Админ управляет синхро‑плеером (play/pause). Не‑админ — только «разрешает звук» (user gesture).
                 if (!IS_ADMIN) {
@@ -1029,19 +1206,22 @@ if (queueUIBusy) {
             });
         }
         var pauseBtn = document.getElementById("player-pause-btn");
-        if (pauseBtn) {
+        if (pauseBtn && pauseBtn.dataset.bound !== "1") {
+            pauseBtn.dataset.bound = "1";
             pauseBtn.addEventListener("click", function () {
                 if (socket) socket.emit("admin_playback_cmd", { action: "pause" });
             });
         }
         var restartBtn = document.getElementById("player-restart-btn");
-        if (restartBtn) {
+        if (restartBtn && restartBtn.dataset.bound !== "1") {
+            restartBtn.dataset.bound = "1";
             restartBtn.addEventListener("click", function () {
                 if (socket) socket.emit("admin_playback_cmd", { action: "restart" });
             });
         }
         var stopBtn = document.getElementById("player-stop-btn");
-        if (stopBtn) {
+        if (stopBtn && stopBtn.dataset.bound !== "1") {
+            stopBtn.dataset.bound = "1";
             stopBtn.addEventListener("click", function () {
                 if (!IS_ADMIN) return;
                 if (socket) socket.emit("admin_playback_cmd", { action: "stop" });
@@ -1051,7 +1231,8 @@ if (queueUIBusy) {
         
         // Кастомный прогресс‑бар (YPlayer). Seek — только для админа.
         var bar = document.getElementById("yplayer-bar");
-        if (bar) {
+        if (bar && bar.dataset.bound !== "1") {
+            bar.dataset.bound = "1";
             var seekFromClient = function (clientX) {
                 var rect = bar.getBoundingClientRect();
                 var ratio = (clientX - rect.left) / rect.width;
@@ -1129,7 +1310,8 @@ if (queueUIBusy) {
             try { localStorage.setItem(MUTED_KEY, a2.muted ? "1" : "0"); } catch (e) {}
         }
 
-        if (vol) {
+        if (vol && vol.dataset.bound !== "1") {
+            vol.dataset.bound = "1";
             var onVol = function () {
                 var a2 = getSyncAudioEl();
                 if (!a2) return;
@@ -1147,7 +1329,8 @@ if (queueUIBusy) {
             vol.addEventListener("change", onVol);
         }
 
-        if (mute) {
+        if (mute && mute.dataset.bound !== "1") {
+            mute.dataset.bound = "1";
             var lastPointerMuteTs = 0;
             var onMute = function () {
                 var a2 = getSyncAudioEl();
@@ -1225,6 +1408,69 @@ function formatTime(sec) {
     }
 
 
+
+    // --- Kick button delegation (capture) ---
+    // IMPORTANT:
+    // Some parts of the UI attach navigation handlers on pointerdown/mousedown
+    // (e.g. clicking a panel/track navigates). In that case a normal "click" handler
+    // never fires. We therefore intercept pointerdown/mousedown in capture phase.
+    function bindKickDelegationOnce() {
+        if (window.__KICK_DELEGATION_BOUND__) return;
+        window.__KICK_DELEGATION_BOUND__ = true;
+
+        function handleKickEvent(e) {
+            var btn = e.target && e.target.closest ? e.target.closest(".btn-kick-rater") : null;
+            if (!btn) return;
+
+            // Capture phase: ensure we receive event even if other handlers stop it.
+            try {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+            } catch (err) {}
+
+            // Delegate to a single global implementation.
+            if (window.kickRaterFromBtn) {
+                window.kickRaterFromBtn(btn, e);
+            }
+        }
+
+        // Intercept early (before click), otherwise parent pointerdown navigation can swallow it.
+        document.addEventListener("pointerdown", handleKickEvent, true);
+        document.addEventListener("mousedown", handleKickEvent, true);
+        document.addEventListener("click", handleKickEvent, true);
+    }
+
+    // Inline onclick fallback.
+    // In some layouts (especially with nested overlays / draggable headers),
+    // delegated listeners could be swallowed by other scripts. Inline handler
+    // ensures the click always triggers.
+    function kickRaterFromBtn(btn, e) {
+        if (!btn) return;
+        try {
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+            }
+        } catch (err) {}
+        // NOTE: we always emit; server enforces admin rights.
+        // This avoids "silent" failures when template flags are missing.
+        var raterId = btn.getAttribute("data-rater-id") || null;
+        var userId = btn.getAttribute("data-user-id") || null;
+        var ok = confirm("Кикнуть оценщика и убрать его панель?");
+        if (!ok) return;
+        var s = window.__APP_SOCKET__ || socket;
+        if (!s) {
+            try { toast("Socket не подключён"); } catch (err) {}
+            return;
+        }
+        try { console.log("[kick] emit", { user_id: userId, rater_id: raterId }); } catch (err) {}
+        s.emit("kick_rater", { user_id: userId, rater_id: raterId });
+    }
+
+    try { window.kickRaterFromBtn = kickRaterFromBtn; } catch (e) {}
+
 function initSocket() {
         if (typeof io === "undefined") {
             console.error("Socket.IO script not loaded");
@@ -1236,14 +1482,75 @@ function initSocket() {
         socket.on("connect", function () {
     console.log("[socket] connected");
     socket.emit("request_initial_state");
-    // Очередь + плеер нужны только в панели
+    // Join/leave panel room (observers get synced state only while on panel)
     if (isPanelPage) {
-        socket.emit("request_queue_state");
+        socket.emit("enter_panel");
+    } else {
+        socket.emit("leave_panel");
     }
 });
 socket.on("connect_error", function (err) {
             console.error("[socket] connect_error", err);
         });
+
+        function refreshRatingButtons() {
+            var joinBtn = document.getElementById("join-rating-btn");
+            var leaveBtn = document.getElementById("leave-rating-btn");
+            if (joinBtn) joinBtn.style.display = window.__IN_RATING__ ? "none" : "inline-flex";
+            if (leaveBtn) leaveBtn.style.display = window.__IN_RATING__ ? "inline-flex" : "none";
+        }
+
+        socket.on("rating_joined", function (payload) {
+            window.__IN_RATING__ = true;
+            try { window.__MY_RATER_ID__ = payload && payload.rater_id ? String(payload.rater_id) : null; } catch (e) {}
+            try { window.__MY_USER_ID__ = payload && payload.user_id ? String(payload.user_id) : null; } catch (e) {}
+            refreshRatingButtons();
+        });
+
+        socket.on("rating_left", function () {
+            window.__IN_RATING__ = false;
+            try { window.__MY_RATER_ID__ = null; } catch (e) {}
+            try { window.__MY_USER_ID__ = null; } catch (e) {}
+            stopSyncAudio();
+            refreshRatingButtons();
+        });
+
+        socket.on("kicked", function () {
+            window.__IN_RATING__ = false;
+            try { window.__MY_RATER_ID__ = null; } catch (e) {}
+            try { window.__MY_USER_ID__ = null; } catch (e) {}
+            stopSyncAudio();
+            refreshRatingButtons();
+            alert("Вас кикнули из оценки");
+        });
+
+        socket.on("kick_result", function (payload) {
+            try { console.log("[kick] result", payload); } catch (err) {}
+            var ok = payload && payload.ok;
+            var msg = (payload && payload.msg) || (ok ? "ok" : "fail");
+            try {
+                if (ok) toast("Кик выполнен");
+                else if (msg === "not_admin") toast("Нет прав (только админ)");
+                else if (msg === "not_found") toast("Оценщик не найден");
+                else if (msg === "no_target") toast("Некорректная цель");
+                else toast("Кик не выполнен");
+            } catch (err) {}
+        });
+
+        socket.on("raters_presence_updated", function (payload) {
+            try {
+                var list = (payload && payload.raters) ? payload.raters : [];
+                list.forEach(function (r) {
+                    if (r && r.rater_id && r.user_id != null) {
+                        window.__RATER_USER_MAP__[String(r.rater_id)] = String(r.user_id);
+                    }
+                });
+            } catch (e) {}
+            refreshRatingButtons();
+            // Re-render panels so admin kick buttons can appear when user_id becomes known.
+            renderAllPanels();
+        });
+
 
         socket.on("initial_state", function (payload) {
             state.track_name = payload.track_name || "";
@@ -1251,6 +1558,9 @@ socket.on("connect_error", function (err) {
             state.raters = {};
             (payload.raters || []).forEach(function (r) {
                 state.raters[r.id] = r;
+                if (r && (r.user_id == null) && window.__RATER_USER_MAP__ && r.id && window.__RATER_USER_MAP__[String(r.id)]) {
+                    r.user_id = window.__RATER_USER_MAP__[String(r.id)];
+                }
             });
 
             var trackInput = document.getElementById("track-name-input");
@@ -1263,6 +1573,14 @@ socket.on("connect_error", function (err) {
 
         socket.on("queue_state", function (payload) {
             renderQueueState(payload);
+            // On a hard reload the server can emit `playback_state` before `queue_state`.
+            // If `playback_state` arrives without `active` meta, the player may not attach
+            // the correct src until we re-apply after queue meta becomes available.
+            try {
+                if (playbackState && (!playbackState.active || !playbackState.active.audio_url) && payload && payload.active) {
+                    applyPlaybackState(playbackState);
+                }
+            } catch (e) {}
         });
 
         socket.on("playback_state", function (payload) {
@@ -1373,16 +1691,19 @@ socket.on("connect_error", function (err) {
         var layer = document.getElementById("bg-rain-layer");
         if (!layer) return;
 
+        // Turbo navigation triggers TrackRaterRebind() on every page visit.
+        // Without a guard we would create multiple intervals and the rain would duplicate.
+        if (layer.__rainInited) return;
+        layer.__rainInited = true;
+
         var ICON_TYPES = ["logo", "frog", "text"];
 
         function spawnIcon() {
             if (!layer) return;
 
-            // контейнер, который падает вниз
             var el = document.createElement("div");
             el.classList.add("rain-icon");
 
-            // внутренний элемент, который несёт на себе картинку / текст и поворот
             var inner = document.createElement("div");
             inner.classList.add("rain-icon-inner");
 
@@ -1400,47 +1721,42 @@ socket.on("connect_error", function (err) {
             el.style.width = size + "px";
             el.style.height = size + "px";
 
-            // более медленное падение: ~9–12 секунд на весь экран
             var duration = 9 + Math.random() * 3;
             el.style.setProperty("--duration", duration + "s");
             el.style.animationDuration = duration + "s";
 
-            // случайный наклон элемента от -40 до 40 градусов
             var rot = (Math.random() * 80 - 40).toFixed(1);
             inner.style.setProperty("--rot", rot + "deg");
 
             el.appendChild(inner);
             layer.appendChild(el);
 
-            // удаляем элемент по окончанию анимации, чтобы он не пропадал посередине
             function cleanup() {
                 if (el && el.parentNode) {
                     el.parentNode.removeChild(el);
                 }
             }
             el.addEventListener("animationend", cleanup);
-
-            // запасной таймер на случай, если animationend не сработает
             setTimeout(cleanup, (duration + 5) * 1000);
         }
-// начальное заполнение — побольше элементов сразу
+
         for (var i = 0; i < 10; i++) {
             setTimeout(spawnIcon, i * 400);
         }
 
-        // далее — новые элементы примерно раз в 0.9 секунды,
-        // чтобы на экране почти всегда было 6–10+ иконок
         setInterval(spawnIcon, 900);
     }
-
-
-    
-    
 function initTopPage() {
         var tbody = document.getElementById("top-table-body");
         if (!tbody) {
             return; // не на странице топа
         }
+
+        // Prevent double-binding when navigating with Turbo.
+        if (tbody.__topInited) {
+            return;
+        }
+        tbody.__topInited = true;
 
         // Клик по строке открывает модалку, но игнорируем клики по админ-кнопкам и ссылкам
         tbody.addEventListener("click", function (evt) {
@@ -1462,6 +1778,8 @@ function initTopPage() {
         // Админ: обработчики переименования и удаления
         var renameButtons = document.querySelectorAll(".top-action-rename");
         renameButtons.forEach(function (btn) {
+            if (btn.__topInited) return;
+            btn.__topInited = true;
             btn.addEventListener("click", function (evt) {
                 evt.stopPropagation();
                 var row = btn.closest(".top-row");
@@ -1500,6 +1818,8 @@ function initTopPage() {
 
         var deleteButtons = document.querySelectorAll(".top-action-delete");
         deleteButtons.forEach(function (btn) {
+            if (btn.__topInited) return;
+            btn.__topInited = true;
             btn.addEventListener("click", function (evt) {
                 evt.stopPropagation();
                 var row = btn.closest(".top-row");
@@ -1545,219 +1865,225 @@ function initTopPage() {
         }
     }
 function openTrackDetailsModal(trackId) {
+        // Track details modal for Top/Mini-top ("Информация по треку")
+        // NOTE: This is NOT the rating/result modal.
+        var backdrop = document.getElementById("track-modal-backdrop");
+        if (!backdrop) {
+            // Fallback: if a page doesn't have the track details modal, open the track page.
+            window.location.href = "/track/" + trackId;
+            return;
+        }
+
         fetch("/api/track/" + trackId + "/summary")
             .then(function (resp) {
                 if (!resp.ok) throw new Error("failed");
                 return resp.json();
             })
             .then(function (data) {
-                var backdrop = document.getElementById("track-modal-backdrop");
-                if (!backdrop) return;
+                var trackName = (data && data.track && data.track.name) ? data.track.name : "Без названия";
+                var criteria = (data && Array.isArray(data.criteria)) ? data.criteria : [];
+                var raters = (data && Array.isArray(data.raters)) ? data.raters : [];
+                var viewerCriteria = (data && Array.isArray(data.viewer_criteria)) ? data.viewer_criteria : [];
 
                 var subtitle = document.getElementById("track-modal-subtitle");
-                var tbodyCriteria = document.getElementById("track-modal-criteria-body");
-                var tbodyRaters = document.getElementById("track-modal-raters-body");
-                var overallEl = document.getElementById("track-modal-overall");
+                if (subtitle) subtitle.textContent = "Трек: " + trackName;
 
-                if (subtitle && data.track) {
-                    var name = data.track.name || "Без названия";
-                    subtitle.textContent = "Трек: " + name;
-                }
-
-                if (tbodyCriteria) {
-                    tbodyCriteria.innerHTML = "";
-                    (data.criteria || []).forEach(function (c) {
+                var bodyA = document.getElementById("track-modal-criteria-body");
+                if (bodyA) {
+                    bodyA.innerHTML = "";
+                    criteria.forEach(function (c) {
                         var tr = document.createElement("tr");
-                        var tdName = document.createElement("td");
-                        var tdScore = document.createElement("td");
-
-                        tdName.textContent = criterionLabelFromKey(c.key);
-                        tdScore.textContent = (c.avg != null ? c.avg.toFixed(2) : "?");
-
-                        tr.appendChild(tdName);
-                        tr.appendChild(tdScore);
-                        tbodyCriteria.appendChild(tr);
+                        var td1 = document.createElement("td");
+                        td1.textContent = c.label || criterionLabelFromKey(c.key);
+                        var td2 = document.createElement("td");
+                        var chip = document.createElement("span");
+                        chip.className = "score-chip";
+                        chip.textContent = (typeof c.avg === "number") ? c.avg.toFixed(2) : "—";
+                        td2.appendChild(chip);
+                        tr.appendChild(td1);
+                        tr.appendChild(td2);
+                        bodyA.appendChild(tr);
+                        if (typeof applyHeatToChip === "function" && typeof c.avg === "number") {
+                            try { applyHeatToChip(chip, c.avg); } catch (e) {}
+                        }
                     });
                 }
 
-                if (tbodyRaters) {
-                    tbodyRaters.innerHTML = "";
-                    (data.raters || []).forEach(function (r) {
+                var bodyV = document.getElementById("track-modal-viewers-criteria-body");
+                if (bodyV) {
+                    bodyV.innerHTML = "";
+                    viewerCriteria.forEach(function (c) {
                         var tr = document.createElement("tr");
-                        var tdName = document.createElement("td");
-                        var tdScore = document.createElement("td");
-
-                        tdName.textContent = r.name;
-                        tdScore.textContent = (r.avg != null ? r.avg.toFixed(2) : "?");
-
-                        tr.appendChild(tdName);
-                        tr.appendChild(tdScore);
-                        tbodyRaters.appendChild(tr);
+                        var td1 = document.createElement("td");
+                        td1.textContent = c.label || criterionLabelFromKey(c.key);
+                        var td2 = document.createElement("td");
+                        var chip = document.createElement("span");
+                        chip.className = "score-chip";
+                        chip.textContent = (typeof c.avg === "number") ? c.avg.toFixed(2) : "—";
+                        td2.appendChild(chip);
+                        tr.appendChild(td1);
+                        tr.appendChild(td2);
+                        bodyV.appendChild(tr);
+                        if (typeof applyHeatToChip === "function" && typeof c.avg === "number") {
+                            try { applyHeatToChip(chip, c.avg); } catch (e) {}
+                        }
                     });
                 }
 
-                if (overallEl) {
-                    var overall = data.overall_avg;
-                    if (overall != null) {
-                        overallEl.textContent = overall.toFixed(2);
-                        if (typeof applyHeatToChip === "function") {
-                            applyHeatToChip(overallEl, overall);
+                var bodyR = document.getElementById("track-modal-raters-body");
+                if (bodyR) {
+                    bodyR.innerHTML = "";
+                    raters.forEach(function (r) {
+                        var tr = document.createElement("tr");
+                        var td1 = document.createElement("td");
+                        td1.textContent = r.name || "—";
+                        var td2 = document.createElement("td");
+                        var chip = document.createElement("span");
+                        chip.className = "score-chip";
+                        chip.textContent = (typeof r.avg === "number") ? r.avg.toFixed(2) : "—";
+                        td2.appendChild(chip);
+                        tr.appendChild(td1);
+                        tr.appendChild(td2);
+                        bodyR.appendChild(tr);
+                        if (typeof applyHeatToChip === "function" && typeof r.avg === "number") {
+                            try { applyHeatToChip(chip, r.avg); } catch (e) {}
                         }
-                    } else {
-                        overallEl.textContent = "?";
-                        if (overallEl.classList) {
-                            overallEl.classList.remove("score-chip--flame", "score-chip--hot");
-                        }
+                    });
+                }
+
+                var overall = document.getElementById("track-modal-overall");
+                if (overall) {
+                    var v = (typeof data.overall_avg === "number") ? data.overall_avg : null;
+                    overall.textContent = (v != null) ? v.toFixed(2) : "—";
+                    if (typeof applyHeatToChip === "function" && v != null) {
+                        try { applyHeatToChip(overall, v); } catch (e) {}
                     }
                 }
 
-
-                var openPageBtn = document.getElementById("track-modal-open-page");
-                if (openPageBtn) {
-                    openPageBtn.setAttribute("href", "/track/" + trackId);
-                }
-
-                // зрители: таблица и общий балл
-                var tbodyViewersCriteria = document.getElementById("track-modal-viewers-criteria-body");
-                var viewersOverallEl = document.getElementById("track-modal-viewers-overall");
-
-                if (tbodyViewersCriteria) {
-                    tbodyViewersCriteria.innerHTML = "";
-                    (data.viewer_criteria || []).forEach(function (c) {
-                        var tr = document.createElement("tr");
-                        var tdName = document.createElement("td");
-                        var tdScore = document.createElement("td");
-
-                        tdName.textContent = criterionLabelFromKey(c.key);
-                        if (c.avg != null) {
-                            tdScore.textContent = c.avg.toFixed(2);
-                        } else {
-                            tdScore.textContent = "?";
-                        }
-
-                        tr.appendChild(tdName);
-                        tr.appendChild(tdScore);
-                        tbodyViewersCriteria.appendChild(tr);
-                    });
-                }
-
-                if (viewersOverallEl) {
-                    var vOverall = data.viewer_overall_avg;
-                    if (vOverall != null) {
-                        viewersOverallEl.textContent = vOverall.toFixed(2);
-                        if (typeof applyHeatToChip === "function") {
-                            applyHeatToChip(viewersOverallEl, vOverall);
-                        }
-                    } else {
-                        viewersOverallEl.textContent = "?";
-                        if (viewersOverallEl.classList) {
-                            viewersOverallEl.classList.remove("score-chip--flame", "score-chip--hot");
-                        }
+                var vOverall = document.getElementById("track-modal-viewers-overall");
+                if (vOverall) {
+                    var vv = (typeof data.viewer_overall_avg === "number") ? data.viewer_overall_avg : null;
+                    vOverall.textContent = (vv != null) ? vv.toFixed(2) : "—";
+                    if (typeof applyHeatToChip === "function" && vv != null) {
+                        try { applyHeatToChip(vOverall, vv); } catch (e) {}
                     }
                 }
 
-        
-        // QR-код и ссылка на страницу трека
-        var qrImg = document.getElementById("modal-track-qr");
-        if (qrImg) {
-            if (payload.qr_url) {
-                qrImg.src = payload.qr_url;
-                qrImg.style.display = "block";
-            } else {
-                qrImg.style.display = "none";
-            }
-        }
+                var openLink = document.getElementById("track-modal-open-page");
+                if (openLink) openLink.setAttribute("href", "/track/" + trackId);
 
-
-        backdrop.classList.add("is-open");
+                backdrop.classList.add("is-open");
             })
-            .catch(function (err) {
-                console.error("Failed to load track summary", err);
+            .catch(function () {
+                try { showToast("Не удалось загрузить информацию по треку", "error"); } catch (e) {}
             });
-    }
-
-    
+}
 
     function initTrackDetailsModalHandlers() {
         var backdrop = document.getElementById("track-modal-backdrop");
-        var closeBtn = document.getElementById("track-modal-close");
-        if (!backdrop) {
-            return; // на этой странице модалки нет
-        }
+        if (!backdrop) return;
+        if (backdrop.dataset.bound === "1") return;
+        backdrop.dataset.bound = "1";
 
-        function closeModal() {
+        var closeBtn = document.getElementById("track-modal-close");
+        var openLink = document.getElementById("track-modal-open-page");
+
+        function close() {
             backdrop.classList.remove("is-open");
         }
 
         if (closeBtn) {
-            closeBtn.addEventListener("click", function () {
-                closeModal();
+            closeBtn.addEventListener("click", function (e) {
+                e.preventDefault();
+                close();
             });
         }
 
-        backdrop.addEventListener("click", function (evt) {
-            if (evt.target === backdrop) {
-                closeModal();
-            }
+        // Clicking outside the card closes the modal
+        backdrop.addEventListener("click", function (e) {
+            if (e.target === backdrop) close();
         });
 
-        document.addEventListener("keydown", function (e) {
-            if (e.key === "Escape" || e.key === "Esc") {
-                if (backdrop.classList.contains("is-open")) {
-                    closeModal();
+        // Let the link behave normally but close the modal if user clicks it
+        if (openLink) {
+            openLink.addEventListener("click", function () {
+                close();
+            });
+        }
+
+        // ESC to close (bind once per page)
+        if (!document.documentElement.dataset.trackModalEscBound) {
+            document.documentElement.dataset.trackModalEscBound = "1";
+            document.addEventListener("keydown", function (e) {
+                if (e.key === "Escape") {
+                    var b = document.getElementById("track-modal-backdrop");
+                    if (b && b.classList.contains("is-open")) {
+                        b.classList.remove("is-open");
+                    }
                 }
-            }
+            });
+        }
+    }
+
+    function initAdminTabs() {
+        // Admin page tabs: navigate via /admin?tab=...
+        var tabsBar = document.querySelector(".admin-tabs");
+        if (!tabsBar) return;
+
+        var buttons = tabsBar.querySelectorAll("[data-admin-tab]");
+        buttons.forEach(function (btn) {
+            if (btn.dataset.bound) return;
+            btn.dataset.bound = "1";
+            btn.addEventListener("click", function () {
+                var tab = btn.getAttribute("data-admin-tab");
+                if (!tab) return;
+                var url = "/admin?tab=" + encodeURIComponent(tab);
+                try {
+                    if (window.Turbo && typeof window.Turbo.visit === "function") {
+                        window.Turbo.visit(url);
+                    } else {
+                        window.location.href = url;
+                    }
+                } catch (e) {
+                    window.location.href = url;
+                }
+            });
         });
     }
 
-function criterionLabelFromKey(key) {
-        var map = {
-            "rhyme": "Текст + Рифмы",
-            "structure": "Структура + Ритмика",
-            "style": "Реализация стиля + Жанра",
-            "quality": "Качество + Сведение",
-            "vibe": "Вайб + Общее впечатление"
-        };
-        return map[key] || key;
-    }
 
-document.addEventListener("DOMContentLoaded", function () {
-
-// --- Queue interaction guard (prevents select auto-close) ---
-// Мы не должны пересобирать DOM очереди, пока пользователь взаимодействует с <select>/<button>,
-// иначе браузер закрывает dropdown. Во время "busy" мы копим последний payload и применяем его после.
-var queuePanel = document.getElementById("queue-panel");
-if (queuePanel) {
-    var releaseBusy = function () {
-        if (queueUIBusyTimer) clearTimeout(queueUIBusyTimer);
-        queueUIBusyTimer = setTimeout(function () {
-            queueUIBusy = false;
-
-            // если за время взаимодействия пришли обновления — применим последнее
-            if (pendingQueuePayload) {
-                var p = pendingQueuePayload;
-                pendingQueuePayload = null;
-                try { renderQueueState(p); } catch (e) { }
-            }
-        }, 300);
-    };
-
-    var setBusy = function () {
-        queueUIBusy = true;
-        if (queueUIBusyTimer) clearTimeout(queueUIBusyTimer);
-    };
-
-    // Любое взаимодействие внутри очереди
-    queuePanel.addEventListener("pointerdown", setBusy, true);
-    queuePanel.addEventListener("focusin", setBusy, true);
-
-    // Снимаем busy после завершения действия/потери фокуса
-    queuePanel.addEventListener("pointerup", releaseBusy, true);
-    queuePanel.addEventListener("focusout", releaseBusy, true);
-    queuePanel.addEventListener("change", releaseBusy, true);
-}
+    function TrackRaterRebind() {
+        // Refresh privilege flags after Turbo navigation.
+        try {
+            isAdmin = !!(window && window.__IS_ADMIN__);
+            canQueueModerate = (!!(window && window.__IS_JUDGE__)) || isAdmin;
+        } catch (e) {}
         isPanelPage = !!document.getElementById("queue-panel");
         isQueuePublicPage = !!document.getElementById("queue-public-page");
+
+        // If the auth state changed (login/logout) during a Turbo navigation,
+        // the existing Socket.IO connection can still be tied to the previous
+        // session cookie. A simple disconnect/connect is sometimes not enough
+        // (Socket.IO can reuse the underlying manager/transport). We therefore
+        // recreate the socket instance on auth changes.
+        try {
+            var cu = (document.body && document.body.dataset) ? (document.body.dataset.currentUser || "") : "";
+            var sv = (document.body && document.body.dataset) ? (document.body.dataset.sessionVersion || "") : "";
+            var sig = String(cu) + "|" + String(sv);
+            if (typeof window !== "undefined") {
+                if (window.__TR_LAST_AUTH_SIG__ != null && window.__TR_LAST_AUTH_SIG__ !== sig) {
+                    // Fully recreate socket (more reliable than disconnect/connect)
+                    if (socket) {
+                        try { socket.removeAllListeners(); } catch (e) {}
+                        try { socket.disconnect(); } catch (e) {}
+                    }
+                    socket = null;
+                    try { window.__APP_SOCKET__ = null; } catch (e) {}
+                    socketInited = false;
+                }
+                window.__TR_LAST_AUTH_SIG__ = sig;
+            }
+        } catch (e) {}
         if (window.INITIAL_STATE) {
             state.track_name = window.INITIAL_STATE.track_name || "";
             state.raters = {};
@@ -1772,32 +2098,65 @@ if (queuePanel) {
         initTrackInput();
         initControls();
         initModalHandlers();
-        initSocket();
+        bindKickDelegationOnce();
+        initImageLightbox();
+        // Update panel room membership on navigation.
+        try {
+            if (socket) {
+                if (isPanelPage) socket.emit("enter_panel");
+                else socket.emit("leave_panel");
+            }
+        } catch (e) {}
+        // Create (or recreate) the Socket.IO connection.
+        if (!socketInited) {
+            socketInited = true;
+            initSocket();
+        }
 
         // Публичная очередь (/queue) обновляется через JSON‑API,
         // чтобы статус "конвертируется" переходил в "в очереди" без перезагрузки.
+        // Public queue polling (/queue)
         if (isQueuePublicPage) {
             try {
-                setInterval(function () {
-                    fetch("/api/queue", { credentials: "same-origin" })
-                        .then(function (r) { return r.json(); })
-                        .then(function (payload) {
-                            if (!payload) return;
-                            renderQueueState(payload);
-                            // обновим "Сейчас играет" на публичной странице
-                            var cur = document.getElementById("queue-current-value");
-                            if (cur) {
-                                cur.textContent = (payload.active && payload.active.display_name) ? payload.active.display_name : "—";
-                            }
-                        })
-                        .catch(function () { });
-                }, 2000);
+                if (!queuePublicPollIntervalId) {
+                    queuePublicPollIntervalId = setInterval(function () {
+                        fetch("/api/queue", { credentials: "same-origin" })
+                            .then(function (r) { return r.json(); })
+                            .then(function (payload) {
+                                if (!payload) return;
+                                renderQueueState(payload);
+                                // обновим "Сейчас играет" на публичной странице
+                                var cur = document.getElementById("queue-current-value");
+                                if (cur) {
+                                    cur.textContent = (payload.active && payload.active.display_name) ? payload.active.display_name : "—";
+                                }
+                            })
+                            .catch(function () { });
+                    }, 2000);
+                }
             } catch (e) { }
+        } else {
+            // Stop polling when leaving /queue
+            if (queuePublicPollIntervalId) {
+                try { clearInterval(queuePublicPollIntervalId); } catch (e) {}
+                queuePublicPollIntervalId = null;
+            }
         }
         initPlaybackControls();
         initBackgroundRain();
         initTopPage();
+        try { applyHeatToAllScoreChips(document); } catch (e) {}
         initTrackDetailsModalHandlers();
+        initAdminTabs();
+        try { if (window.initYplayerEmbeds) window.initYplayerEmbeds(); } catch (e) {}
+    }
+
+
+    // Hotwire Turbo-safe boot:
+    // turbo:load fires on initial page load and after every Turbo navigation.
+    document.addEventListener("turbo:load", function () {
+        TrackRaterRebind();
+        try { window.TrackRaterRebind = TrackRaterRebind; } catch (e) {}
     });
 
 
@@ -1805,49 +2164,6 @@ if (queuePanel) {
     if (typeof window !== "undefined") {
         window.openTrackDetailsModal = openTrackDetailsModal;
     }
-
-    
-    // Подкрашиваем все score-chip на странице карточки трека
-    document.addEventListener("DOMContentLoaded", function () {
-        var root = document.getElementById("track-page-root");
-        if (!root || typeof applyHeatToChip !== "function") return;
-
-        var chips = root.querySelectorAll(".score-chip");
-        chips.forEach(function (chip) {
-            var txt = (chip.textContent || "").replace(",", ".").trim();
-            var val = parseFloat(txt);
-            if (!isNaN(val)) {
-                applyHeatToChip(chip, val);
-            }
-        });
-    });
-
-    
-    // Подкрашиваем все score-chip на сайте + оборачиваем текст в .score-chip-label,
-    // чтобы пламя было над чипом, но под цифрой
-    document.addEventListener("DOMContentLoaded", function () {
-        var chips = document.querySelectorAll(".score-chip");
-        chips.forEach(function (chip) {
-            // если цифра ещё не обёрнута во внутренний span — оборачиваем
-            if (!chip.querySelector(".score-chip-label")) {
-                var rawText = (chip.textContent || "").trim();
-                chip.textContent = "";
-                var inner = document.createElement("span");
-                inner.className = "score-chip-label";
-                inner.textContent = rawText;
-                chip.appendChild(inner);
-            }
-
-            var label = chip.querySelector(".score-chip-label");
-            var txt = (label && label.textContent ? label.textContent : chip.textContent || "")
-                .replace(",", ".")
-                .trim();
-            var val = parseFloat(txt);
-            if (!isNaN(val) && typeof applyHeatToChip === "function") {
-                applyHeatToChip(chip, val);
-            }
-        });
-    });
 
 
 })();

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Регистрация · Оценка треков{% endblock %}
+
+{% block content %}
+<div class="center-page">
+    <section class="auth-card">
+        <h1 class="auth-title">Регистрация</h1>
+        <p class="auth-subtitle">Создай аккаунт, подтверди email и оставляй рецензии на треки.</p>
+
+        {#
+          ВАЖНО: регистрация должна быть вне Turbo.
+          Иначе сессия/Socket.IO может остаться в старом состоянии.
+        #}
+        <form method="post" action="{{ url_for('register') }}" class="auth-form" data-turbo="false">
+            <label class="auth-field">
+                <span>Логин</span>
+                <input type="text" name="username" autocomplete="username" required
+                       value="{{ (form.username if form else '')|e }}"
+                       placeholder="3–20, латиница/цифры/_">
+                {% if errors and errors.username %}
+                    <div class="field-error">{{ errors.username }}</div>
+                {% endif %}
+            </label>
+
+            <label class="auth-field">
+                <span>Email</span>
+                <input type="email" name="email" autocomplete="email" required
+                       value="{{ (form.email if form else '')|e }}"
+                       placeholder="you@example.com">
+                {% if errors and errors.email %}
+                    <div class="field-error">{{ errors.email }}</div>
+                {% endif %}
+            </label>
+
+            <label class="auth-field">
+                <span>Пароль</span>
+                <input type="password" name="password" autocomplete="new-password" required>
+                {% if errors and errors.password %}
+                    <div class="field-error">{{ errors.password }}</div>
+                {% endif %}
+            </label>
+
+            <label class="auth-field">
+                <span>Повтор пароля</span>
+                <input type="password" name="password2" autocomplete="new-password" required>
+                {% if errors and errors.password2 %}
+                    <div class="field-error">{{ errors.password2 }}</div>
+                {% endif %}
+            </label>
+
+            <button type="submit" class="btn-primary auth-btn">Создать аккаунт</button>
+
+            <div class="auth-links">
+                <a href="{{ url_for('login') }}" data-turbo="false">Уже есть аккаунт? Войти</a>
+            </div>
+        </form>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% endblock %}

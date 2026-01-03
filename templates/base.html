@@ -5,12 +5,15 @@
     <title>{% block title %}Оценка треков{% endblock %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.snow.css" rel="stylesheet">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
     {% block head_extra %}{% endblock %}
+    <!-- Hotwire Turbo: server-rendered pages + seamless navigation -->
+    <script src="https://unpkg.com/@hotwired/turbo@8/dist/turbo.es2017-umd.js" defer></script>
 </head>
-<body class="{% block body_class %}{% endblock %}">
+<body class="{% block body_class %}{% endblock %}" data-current-user="{{ session.get('user','') }}" data-session-version="{{ session.get('session_version','') }}">
 <div class="page-bg"></div>
-<div id="bg-rain-layer"></div>
+<div id="bg-rain-layer" data-turbo-permanent></div>
 
 
 <header class="top-bar">
@@ -25,7 +28,6 @@
                 <nav class="top-bar-nav" id="top-bar-nav">
                     <a href="{{ url_for('home') }}" class="nav-link">Главная</a>
                     <a href="{{ url_for('top_tracks') }}" class="nav-link">Топ треков</a>
-                    <a href="{{ url_for('viewers_page') }}" class="nav-link">Оценить трек</a>
                     <a href="{{ url_for('queue_page') }}" class="nav-link">Очередь</a>
                     {% set user_role = session.get('role') %}
                     {% if user_role in ['admin', 'superadmin', 'judge'] %}
@@ -46,28 +48,71 @@
                 {% set user_role = session.get('role') %}
                 <div class="user-pill">
                     <span class="user-dot"></span>
-                    <span class="user-name">
-                        {% if user_role == 'judge' %}
-                            Оценщик
-                        {% elif user_role == 'superadmin' %}
-                            Главный админ
-                        {% else %}
-                            Админ
-                        {% endif %}
-                    </span>
+                    <span class="user-name">@{{ session.get('user')|e }}</span>
                 </div>
-                <a href="{{ url_for('logout') }}" class="logout-link">Выйти</a>
+                <a href="{{ url_for('settings_profile') }}" class="logout-link" style="margin-right:10px;">Профиль</a>
+                <a href="{{ url_for('logout') }}" class="logout-link" data-turbo="false">Выйти</a>
             {% else %}
-                <a href="{{ url_for('login') }}" class="logout-link">Войти</a>
+                <a href="{{ url_for('login') }}" class="logout-link" data-turbo="false">Войти</a>
+                <a href="{{ url_for('register') }}" class="logout-link" data-turbo="false" style="margin-left:10px;">Регистрация</a>
             {% endif %}
         </div>
     </div>
 </header>
 
 
-<main class="main-wrapper">
+<main class="main-wrapper" id="app-content">
     {% block content %}{% endblock %}
 </main>
+
+{% include "partials/result_modal.html" %}
+<!-- Global image lightbox (used for news attachments on Home, etc.) -->
+<div class="img-lightbox" id="img-lightbox" data-turbo-permanent aria-hidden="true">
+    <div class="img-lightbox__backdrop" data-close="1"></div>
+    <div class="img-lightbox__dialog" role="dialog" aria-modal="true">
+        <button type="button" class="img-lightbox__close" id="img-lightbox-close" aria-label="Закрыть">×</button>
+        <img class="img-lightbox__img" id="img-lightbox-img" src="" alt="">
+    </div>
+</div>
+
+
+<!-- Global docked player (lives outside swapped content, so it never restarts) -->
+<div class="yplayer-dock" id="yplayer-dock" data-turbo-permanent style="display:none;">
+  <div class="yplayer-dock-inner">
+    <audio id="sync-audio" class="sync-audio-hidden" preload="metadata"></audio>
+
+    <div class="yplayer" id="sync-player" role="group" aria-label="Плеер">
+      <div class="yplayer__left">
+        <button class="yplayer__btn yplayer__btn--play" id="player-play-btn" type="button" aria-label="Play/Pause">
+          <span class="yplayer__icon yplayer__icon--play" id="yplayer-icon"></span>
+        </button>
+        <div class="yplayer__meta">
+          <div class="yplayer__title" id="yplayer-title">—</div>
+          <div class="yplayer__subtitle" id="yplayer-subtitle">—</div>
+        </div>
+      </div>
+
+      <div class="yplayer__center">
+        <div class="yplayer__progress" id="yplayer-progress" aria-label="Прогресс">
+          <span class="yplayer__time" id="yplayer-time-current">0:00</span>
+          <div class="yplayer__bar" id="yplayer-bar" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+            <div class="yplayer__bar-fill" id="yplayer-bar-fill"></div>
+            <div class="yplayer__bar-handle" id="yplayer-bar-handle"></div>
+          </div>
+          <span class="yplayer__time" id="yplayer-time-total">0:00</span>
+        </div>
+      </div>
+
+      <div class="yplayer__right">
+        <button class="yplayer__btn" id="player-stop-btn" type="button" aria-label="Stop">■</button>
+        <div class="yplayer__volume">
+          <button class="yplayer__btn" id="yplayer-mute-btn" type="button" aria-label="Mute">🔊</button>
+          <input class="yplayer__vol" id="yplayer-vol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Громкость">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -77,8 +122,17 @@
     {% endif %}
 {% endwith %}
 
+
+<script>
+    window.__USER_ID__ = {{ current_user.id if current_user else 'null' }};
+    window.__IS_ADMIN__ = {{ 'true' if current_user and current_user.is_admin() else 'false' }};
+    window.__IS_JUDGE__ = {{ 'true' if current_user and current_user.is_judge() else 'false' }};
+</script>
+
 {% block scripts %}
 <script src="https://cdn.socket.io/3.1.3/socket.io.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 <script src="{{ url_for('static', filename='js/yplayer_embed.js') }}"></script>
 {% endblock %}
@@ -140,6 +194,14 @@
         font-size: 16px;
         line-height: 1;
     }
+    /* Image lightbox */
+    .img-lightbox{position:fixed;inset:0;z-index:9998;display:none;}
+    .img-lightbox.is-open{display:block;}
+    .img-lightbox__backdrop{position:absolute;inset:0;background:rgba(0,0,0,.75);}
+    .img-lightbox__dialog{position:relative;max-width:92vw;max-height:92vh;margin:6vh auto 0;display:flex;align-items:center;justify-content:center;}
+    .img-lightbox__img{max-width:92vw;max-height:82vh;border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.55);}
+    .img-lightbox__close{position:absolute;right:-8px;top:-48px;width:40px;height:40px;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(17,24,39,.85);color:#fff;font-size:22px;line-height:38px;cursor:pointer;}
+
 </style>
 
 <script>
@@ -208,25 +270,51 @@
             });
         }
 
-        document.addEventListener("DOMContentLoaded", function () {
-            if (window.__FLASH_MESSAGES__ && Array.isArray(window.__FLASH_MESSAGES__)) {
+        function maybeShowFlash() {
+            if (window.__FLASH_MESSAGES__ && Array.isArray(window.__FLASH_MESSAGES__) && window.__FLASH_MESSAGES__.length) {
                 showToasts(window.__FLASH_MESSAGES__);
+                // With Turbo navigation, `window` persists across visits.
+                // Flash messages should be displayed only once.
+                try { window.__FLASH_MESSAGES__ = null; } catch (e) {}
             }
-        });
+        }
+
+        // Turbo emits `turbo:load`, but on the very first page load this script
+        // might be parsed after that event has already fired. So we also run
+        // immediately when possible and on DOMContentLoaded.
+        document.addEventListener("turbo:load", maybeShowFlash);
+        document.addEventListener("DOMContentLoaded", maybeShowFlash);
+        if (document.readyState !== "loading") {
+            // initial load fallback
+            maybeShowFlash();
+        }
     })();
 </script>
 
 
 <script>
-    document.addEventListener("DOMContentLoaded", function () {
+    document.addEventListener("turbo:load", function () {
         var btn = document.getElementById("nav-toggle");
         var nav = document.getElementById("top-bar-nav");
         if (!btn || !nav) return;
+        if (btn.dataset.bound === "1") return;
+        btn.dataset.bound = "1";
         btn.addEventListener("click", function () {
             var isOpen = nav.classList.toggle("nav-open");
             btn.classList.toggle("nav-toggle--active", isOpen);
         });
     });
+</script>
+
+<script>
+  // Re-bind page-specific handlers after Turbo navigation.
+  document.addEventListener('turbo:load', function () {
+    try {
+      if (window.TrackRaterRebind) {
+        window.TrackRaterRebind();
+      }
+    } catch (e) {}
+  });
 </script>
 
 </body>

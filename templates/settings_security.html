@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Безопасность{% endblock %}
+
+{% block content %}
+<div class="page">
+  <div class="panel">
+    <h1 class="page-title">Настройки</h1>
+
+    <div class="settings-tabs">
+      <a class="settings-tab" href="{{ url_for('settings_profile') }}">Профиль</a>
+      <a class="settings-tab is-active" href="{{ url_for('settings_security') }}">Безопасность</a>
+    </div>
+
+    <h2 class="section-title">Смена пароля</h2>
+    <form method="post" action="{{ url_for('settings_change_password') }}" class="form">
+      <div class="form-row">
+        <label class="form-label" for="current_password">Текущий пароль</label>
+        <input id="current_password" name="current_password" class="form-input" type="password" autocomplete="current-password" required />
+        {% if errors and errors.get('current_password') %}
+          <div class="form-error">{{ errors.get('current_password') }}</div>
+        {% endif %}
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="new_password">Новый пароль</label>
+        <input id="new_password" name="new_password" class="form-input" type="password" autocomplete="new-password" required />
+        {% if errors and errors.get('new_password') %}
+          <div class="form-error">{{ errors.get('new_password') }}</div>
+        {% endif %}
+        <div class="form-hint">Минимум 8 символов.</div>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="new_password2">Повтор нового пароля</label>
+        <input id="new_password2" name="new_password2" class="form-input" type="password" autocomplete="new-password" required />
+        {% if errors and errors.get('new_password2') %}
+          <div class="form-error">{{ errors.get('new_password2') }}</div>
+        {% endif %}
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">Обновить пароль</button>
+      </div>
+    </form>
+
+    <hr class="sep" />
+
+    <h2 class="section-title">Сессии</h2>
+    <form method="post" action="{{ url_for('settings_logout_all') }}" class="form">
+      <div class="form-hint">Завершит все другие входы в аккаунт (кроме текущего).</div>
+      <div class="form-actions">
+        <button type="submit" class="btn-ghost">Выйти со всех устройств</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
