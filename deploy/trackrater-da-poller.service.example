@@ -1,0 +1,14 @@
+[Unit]
+Description=TrackRater DonationAlerts Poller
+After=network.target track_rating.service
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/track_rating/current
+EnvironmentFile=-/etc/default/trackrater
+ExecStart=/var/www/track_rating/venv/bin/python -m trackapp.da_poller
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

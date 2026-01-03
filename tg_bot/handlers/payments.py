@@ -1,6 +1,8 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, LabeledPrice, PreCheckoutQuery, Message
 from aiogram.fsm.context import FSMContext
+import secrets
+
 
 from ..services.trackrater_api import TrackRaterAPI
 from ..config import Settings
@@ -8,12 +10,9 @@ from ..keyboards.main import main_menu_kb
 
 router = Router()
 
-def _da_link(base: str, amount: int, code: str) -> str:
-    if not base:
-        return ""
-    sep = "&" if "?" in base else "?"
-    # DonationAlerts supports amount/message params on the donate page for many setups, but not guaranteed.
-    return f"{base}{sep}amount={amount}&message={code}"
+def _da_link(base: str) -> str:
+    return base or ""
+
 
 @router.callback_query(F.data.startswith("pay:stars:"))
 async def pay_stars(call: CallbackQuery, state: FSMContext):
@@ -61,12 +60,13 @@ async def successful_payment(msg: Message, api: TrackRaterAPI):
     await msg.answer(f"✅ Оплата прошла! Трек добавлен/поднят.\nПозиция: {pos}", reply_markup=main_menu_kb())
 
 @router.callback_query(F.data.startswith("pay:da:"))
-async def pay_da(call: CallbackQuery, settings: Settings):
+async def pay_da(call: CallbackQuery, state: FSMContext, settings: Settings, api: TrackRaterAPI):
     await call.answer()
     _, _, sid, prio = call.data.split(":")
     sid_i=int(sid); prio_i=int(prio)
-    code = f"TR-{sid_i}-P{prio_i}"
-    link = _da_link(settings.donationalerts_base_url, prio_i, code)
+    code = f"TR-{sid_i}-P{prio_i}-" + secrets.token_hex(3).upper()
+    await api.set_waiting_payment(sid_i, priority=prio_i, provider="donationalerts", provider_ref=code)
+    link = _da_link(settings.donationalerts_base_url)
 
     text = (
         f"💸 DonationAlerts:\n\n"

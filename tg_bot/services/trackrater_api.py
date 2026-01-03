@@ -43,10 +43,10 @@ class TrackRaterAPI:
                     raise RuntimeError(f"TrackRater enqueue_free failed: {resp.status} {text}")
                 return await resp.json()
 
-    async def set_waiting_payment(self, submission_id: int, priority: int) -> Dict[str, Any]:
+    async def set_waiting_payment(self, submission_id: int, priority: int, provider: str | None = None, provider_ref: str | None = None) -> Dict[str, Any]:
         url = f"{self.base_url}/api/tg/submissions/{submission_id}/waiting_payment"
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json={"priority": priority}, headers=self._headers(), timeout=30) as resp:
+            async with session.post(url, json={"priority": priority, **({"provider": provider} if provider else {}), **({"provider_ref": provider_ref} if provider_ref else {})}, headers=self._headers(), timeout=30) as resp:
                 text = await resp.text()
                 if resp.status != 200:
                     raise RuntimeError(f"TrackRater set_waiting_payment failed: {resp.status} {text}")

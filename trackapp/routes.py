@@ -27,6 +27,7 @@ from .core import (
 )
 from .state import _serialize_state, _broadcast_queue_state
 from .models import EmailVerificationToken, PasswordResetToken, TrackReview, TrackReviewScore
+from .donationalerts import build_authorize_url, exchange_code_for_tokens, save_tokens, load_tokens, fetch_user_oauth
 
 from datetime import datetime, timedelta
 import re
@@ -918,6 +919,12 @@ def tg_waiting_payment(submission_id: int):
     sub.status = "waiting_payment"
     sub.payment_status = "pending"
     sub.payment_amount = prio
+    provider = (data.get("provider") or "").strip() or None
+    ref = (data.get("provider_ref") or data.get("ref") or "").strip() or None
+    if provider not in (None, "stars", "donationalerts"):
+        return jsonify({"error": "bad provider"}), 400
+    sub.payment_provider = provider
+    sub.payment_ref = ref
     sub.priority_set_at = datetime.utcnow()
     db.session.commit()
     _broadcast_queue_state()
@@ -997,6 +1004,76 @@ def tg_my_queue():
     return jsonify(items)
 
 
+
+
+# ---------------- DonationAlerts OAuth (admin connect) ----------------
+
+@app.route("/da/connect")
+def da_connect():
+    """Start DonationAlerts OAuth flow.
+
+    Open this in browser while logged-in as site admin to connect DonationAlerts account.
+    """
+    # Optional admin-only guard: if auth system exists, we use it; otherwise allow.
+    try:
+        if callable(globals().get("current_user")) and hasattr(current_user, "role"):
+            if getattr(current_user, "role", "") != "admin":
+                return "Forbidden", 403
+    except Exception:
+        pass
+
+    import secrets
+    state = secrets.token_urlsafe(24)
+    session["da_oauth_state"] = state
+    scopes = "oauth-user-show oauth-donation-index"
+    return redirect(build_authorize_url(state=state, scopes=scopes))
+
+
+@app.route("/da/callback")
+def da_callback():
+    # Validate state (CSRF protection)
+    state = request.args.get("state", "")
+    expected = session.get("da_oauth_state", "")
+    if expected and state != expected:
+        return "Bad state", 400
+
+    code = request.args.get("code", "")
+    if not code:
+        err = request.args.get("error") or "missing_code"
+        return f"DonationAlerts auth failed: {err}", 400
+
+    tokens = exchange_code_for_tokens(code)
+    access = tokens.get("access_token")
+    if not access:
+        return "No access_token returned by DonationAlerts", 500
+
+    user = fetch_user_oauth(access)
+    # Persist for poller/listener usage
+    store = load_tokens()
+    store.update(tokens)
+    # Try to persist user info we need later
+    # user payload contains id, code(username), socket_connection_token etc.
+    if isinstance(user, dict):
+        for k in ("id", "code", "socket_connection_token", "main_currency"):
+            if k in user:
+                store[f"user_{k}"] = user.get(k)
+    save_tokens(store)
+
+    return (
+        "<h2>DonationAlerts подключен ✅</h2>"
+        "<p>Можно закрыть эту вкладку и вернуться в Telegram-бот.</p>"
+    )
+
+
+@app.route("/da/status")
+def da_status():
+    data = load_tokens()
+    ok = bool(data.get("access_token") or data.get("refresh_token"))
+    return jsonify({
+        "connected": ok,
+        "user_id": data.get("user_id"),
+        "user": data.get("user_code"),
+    })
 
 
 @app.route("/")
@@ -2395,5 +2472,4 @@ def track_summary(track_id: int):
         "review_count": int(review_count),
     }
     return jsonify(payload)
-
 
