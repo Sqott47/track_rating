@@ -6,3 +6,4 @@ bleach>=6.0.0
 qrcode>=7.4
 python-socketio>=5.10
 python-engineio>=4.8
+requests
