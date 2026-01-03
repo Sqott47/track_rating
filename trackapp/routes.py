@@ -735,7 +735,12 @@ def _tmp_path_for(uuid_hex: str, ext: str) -> str:
     return os.path.join(SUBMISSIONS_TMP_DIR, f"{uuid_hex}.{ext}")
 
 def _raw_key_for(uuid_hex: str, ext: str) -> str:
-    return f"submissions_raw/{uuid_hex}.{ext}"
+    """Build S3 object key for raw submission audio."""
+    ext = (ext or "").lower().lstrip(".")
+    prefix = (S3_PREFIX or "submissions_raw/").strip()
+    if prefix and not prefix.endswith("/"):
+        prefix += "/"
+    return f"{prefix}{uuid_hex}.{ext}"
 
 def _content_type_for_ext(ext: str) -> str:
     ext = (ext or "").lower()
@@ -760,8 +765,8 @@ def _finalize_tmp_to_storage(sub: TrackSubmission) -> None:
     raw_filename = f"{sub.file_uuid}.{ext}"
     raw_path = os.path.join(SUBMISSIONS_RAW_DIR, raw_filename)
 
-    if USE_S3:
-        s3 = _get_s3()
+    s3 = _get_s3_client()
+    if s3:
         key = _raw_key_for(sub.file_uuid, ext)
         with open(tmp_path, "rb") as f:
             s3.upload_fileobj(
@@ -770,9 +775,13 @@ def _finalize_tmp_to_storage(sub: TrackSubmission) -> None:
                 Key=key,
                 ExtraArgs={"ContentType": _content_type_for_ext(ext)},
             )
+        # Optional local mirror for debugging / backup
         if S3_KEEP_LOCAL:
+            os.makedirs(os.path.dirname(raw_path), exist_ok=True)
             shutil.copyfile(tmp_path, raw_path)
     else:
+        # Local storage (default)
+        os.makedirs(os.path.dirname(raw_path), exist_ok=True)
         shutil.copyfile(tmp_path, raw_path)
 
     # cleanup tmp
