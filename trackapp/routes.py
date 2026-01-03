@@ -917,13 +917,14 @@ def tg_waiting_payment(submission_id: int):
         return jsonify({"error": "not found"}), 404
     data = request.get_json(silent=True) or {}
     prio = int(data.get("priority") or 0)
-    if prio not in (1, 100, 200, 300, 400):
+    if prio not in (100, 200, 300, 400):
         return jsonify({"error": "bad priority"}), 400
     if not (sub.artist or "").strip() and not (sub.title or "").strip():
         return jsonify({"error": "missing metadata"}), 400
 
-    sub.priority = prio
-    sub.status = "waiting_payment"
+    # IMPORTANT:
+    # - Do NOT change queue priority until payment is confirmed (mark_paid)
+    # - Do NOT remove already queued track from queue during "raise priority" flow
     sub.payment_status = "pending"
     sub.payment_amount = prio
     provider = (data.get("provider") or "").strip() or None
@@ -932,7 +933,11 @@ def tg_waiting_payment(submission_id: int):
         return jsonify({"error": "bad provider"}), 400
     sub.payment_provider = provider
     sub.payment_ref = ref
-    sub.priority_set_at = datetime.utcnow()
+
+    # For new submissions (not in queue yet) we keep an explicit waiting status,
+    # but for queued/playing tracks we keep the current status.
+    if (sub.status or "") not in ("queued", "playing"):
+        sub.status = "waiting_payment"
     db.session.commit()
     _broadcast_queue_state()
     return jsonify({"ok": True})
@@ -967,10 +972,16 @@ def tg_mark_paid(submission_id: int):
     if amount < required:
         return jsonify({"error": "amount too low", "required": required}), 400
 
-    # Finalize storage (if not finalized yet)
-    _finalize_tmp_to_storage(sub)
+    # Finalize storage only for new submissions that were not enqueued yet.
+    if (sub.status or "") not in ("queued", "playing"):
+        _finalize_tmp_to_storage(sub)
 
-    sub.status = "queued"
+    # Apply priority only after confirmed payment (important for fair queue ordering)
+    sub.priority = required
+
+    # Keep "playing" as-is; otherwise put into queue
+    if (sub.status or "") != "playing":
+        sub.status = "queued"
     sub.payment_status = "paid"
     sub.payment_provider = provider
     sub.payment_ref = provider_ref
@@ -981,6 +992,42 @@ def tg_mark_paid(submission_id: int):
     _broadcast_queue_state()
     return jsonify({"ok": True, "position": _queue_position(submission_id)})
 
+
+@app.route("/api/tg/submissions/<int:submission_id>/cancel", methods=["POST"])
+def tg_cancel_submission(submission_id: int):
+    """Best-effort cancel.
+
+    Used by TG bot "Отмена" button to clean tails:
+    - For draft/waiting_payment: mark deleted and remove tmp file
+    - For queued/playing: clear pending payment fields (upgrade cancelled)
+    """
+    if not _require_tg_bot_token():
+        return jsonify({"error": "forbidden"}), 403
+    sub = db.session.get(TrackSubmission, submission_id)
+    if not sub:
+        return jsonify({"ok": True})
+
+    status = (sub.status or "")
+    if status in ("draft", "waiting_payment"):
+        # delete tmp file if exists
+        try:
+            ext = (sub.original_ext or "").lower()
+            tmp_path = _tmp_path_for(sub.file_uuid, ext)
+            if os.path.isfile(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        sub.status = "deleted"
+
+    # Clear payment tails in all cases
+    sub.payment_status = "none"
+    sub.payment_provider = None
+    sub.payment_ref = None
+    sub.payment_amount = None
+    db.session.commit()
+    _broadcast_queue_state()
+    return jsonify({"ok": True})
+
 @app.route("/api/tg/my_queue", methods=["GET"])
 def tg_my_queue():
     """List submissions in queue belonging to tg_user_id."""
@@ -990,11 +1037,13 @@ def tg_my_queue():
     if not tg_user_id.isdigit():
         return jsonify([])
 
+    # Only show tracks that are actually in queue right now.
+    # (If track was not enqueued yet, or already removed/processed, it must not appear here.)
     rows = (
         db.session.query(TrackSubmission)
         .filter(TrackSubmission.tg_user_id == int(tg_user_id))
-        .filter(TrackSubmission.status.in_(["draft", "waiting_payment", "queued"]))
-        .order_by(TrackSubmission.created_at.desc())
+        .filter(TrackSubmission.status.in_(["queued", "playing"]))
+        .order_by(TrackSubmission.priority.desc(), TrackSubmission.priority_set_at.asc(), TrackSubmission.created_at.asc())
         .limit(50)
         .all()
     )

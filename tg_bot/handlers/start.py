@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 
 from ..keyboards.main import main_menu_kb, check_sub_kb
 from ..services.subscription_check import check_subscription
+from ..services.trackrater_api import TrackRaterAPI
 from ..config import Settings
 
 router = Router()
@@ -48,3 +49,48 @@ async def nav_back(call: CallbackQuery, state: FSMContext, settings: Settings):
     if not await _ensure_subscribed(call, settings):
         return
     await call.message.answer("Главное меню:", reply_markup=main_menu_kb())
+
+
+@router.callback_query(F.data == "nav:cancel")
+async def nav_cancel(call: CallbackQuery, state: FSMContext, settings: Settings, api: TrackRaterAPI):
+    """Cancel any in-progress flow.
+
+    - Clears FSM state
+    - Asks backend to cancel submission / clear pending payment (best-effort)
+    - Returns user to main menu
+    """
+    await call.answer()
+    data = await state.get_data()
+    submission_id = data.get("submission_id")
+    await state.clear()
+    try:
+        if submission_id is not None:
+            await api.cancel_submission(int(submission_id))
+    except Exception:
+        # best-effort cleanup
+        pass
+    if not await _ensure_subscribed(call, settings):
+        return
+    await call.message.answer("❌ Отменено. Главное меню:", reply_markup=main_menu_kb())
+
+
+@router.callback_query(F.data.startswith("nav:prio:"))
+async def nav_back_to_priority(call: CallbackQuery, state: FSMContext, settings: Settings):
+    """Return to priority selection during payment step."""
+    await call.answer()
+    if not await _ensure_subscribed(call, settings):
+        return
+    # keep current state data (submission_id) but reset to priority selection
+    from ..states import SubmitTrack, RaisePriority
+    from ..keyboards.priority import priority_choice_kb
+
+    data = await state.get_data()
+    # If we are in raise flow, free option should be hidden
+    if state.get_state() == RaisePriority.choosing_payment_method.state:
+        await state.set_state(RaisePriority.choosing_priority)
+        await call.message.answer("Выберите новый приоритет:", reply_markup=priority_choice_kb(include_free=False))
+        return
+
+    # Default: submit flow
+    await state.set_state(SubmitTrack.choose_priority)
+    await call.message.answer("Выберите приоритет:", reply_markup=priority_choice_kb(include_free=True))

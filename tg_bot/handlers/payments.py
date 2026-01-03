@@ -78,4 +78,6 @@ async def pay_da(call: CallbackQuery, state: FSMContext, settings: Settings, api
         text += f"\nСсылка: {link}"
     else:
         text += "\n(Ссылка не настроена: установите DONATIONALERTS_URL в .env)"
+    await state.clear()
     await call.message.answer(text)
+    await call.message.answer("Главное меню:", reply_markup=main_menu_kb())

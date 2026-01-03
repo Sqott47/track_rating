@@ -16,6 +16,8 @@ from . import app, db
 from .models import TrackSubmission
 from .donationalerts import get_valid_access_token, list_donations, load_tokens, save_tokens
 
+TG_BOT_TOKEN = os.getenv("TRACKRATER_TG_BOT_TOKEN", "").strip()
+
 CURRENCY_ACCEPT = os.getenv("DA_ACCEPT_CURRENCY", "RUB").strip().upper() or "RUB"
 POLL_INTERVAL = int(os.getenv("DA_POLL_INTERVAL", "7"))  # seconds
 MAX_AGE_MIN = int(os.getenv("DA_PENDING_MAX_AGE_MIN", "20"))
@@ -29,15 +31,28 @@ def _norm_currency(cur: str) -> str:
 
 
 def _get_pending():
-    cutoff = datetime.utcnow() - timedelta(minutes=MAX_AGE_MIN)
+    # We consider ANY submission with a pending DA payment reference, regardless of current status.
+    # This allows "raise priority" flow, where a track stays queued while payment is pending.
     return (
         TrackSubmission.query
-        .filter(TrackSubmission.status == "waiting_payment")
         .filter(TrackSubmission.payment_status == "pending")
         .filter(TrackSubmission.payment_provider == "donationalerts")
-        .filter(TrackSubmission.priority_set_at >= cutoff)
         .all()
     )
+
+
+def _notify_tg(chat_id: int, text: str) -> None:
+    if not TG_BOT_TOKEN or not chat_id:
+        return
+    try:
+        import requests
+        requests.post(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=10,
+        )
+    except Exception:
+        pass
 
 
 def _match_and_apply(donation: dict, pending: list[TrackSubmission]) -> int:
@@ -65,18 +80,28 @@ def _match_and_apply(donation: dict, pending: list[TrackSubmission]) -> int:
             required = int(sub.payment_amount or sub.priority or 0)
             if amount_i < required:
                 continue
-            try:
-                from .routes import _finalize_tmp_to_storage
-                _finalize_tmp_to_storage(sub)
-            except Exception:
-                pass
+            # Finalize storage only for new submissions not enqueued yet
+            if (sub.status or "") not in ("queued", "playing"):
+                try:
+                    from .routes import _finalize_tmp_to_storage
+                    _finalize_tmp_to_storage(sub)
+                except Exception:
+                    pass
+
+            # Apply priority only on successful payment
+            sub.priority = required
+            if (sub.status or "") != "playing":
+                sub.status = "queued"
             sub.payment_status = "paid"
             sub.payment_provider = "donationalerts"
             sub.payment_ref = provider_ref
             sub.payment_amount = required
-            sub.status = "queued"
             db.session.add(sub)
             hits += 1
+            _notify_tg(
+                int(sub.tg_user_id or 0),
+                f"✅ Оплата получена ({required} RUB). Трек добавлен в очередь!",
+            )
     if hits:
         db.session.commit()
         try:

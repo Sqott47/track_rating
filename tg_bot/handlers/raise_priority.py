@@ -33,6 +33,7 @@ async def start_raise(call: CallbackQuery, state: FSMContext, settings: Settings
         name = it.get("display") or f"{it.get('artist','')} — {it.get('title','')}".strip(" —")
         kb.button(text=name[:60], callback_data=f"raise:pick:{sid}")
     kb.button(text="⬅️ Назад", callback_data="nav:back")
+    kb.button(text="❌ Отмена", callback_data="nav:cancel")
     kb.adjust(1)
     await state.clear()
     await state.set_state(RaisePriority.choosing_track)

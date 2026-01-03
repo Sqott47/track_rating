@@ -70,3 +70,14 @@ class TrackRaterAPI:
                 if resp.status != 200:
                     raise RuntimeError(f"TrackRater my_queue failed: {resp.status} {text}")
                 return await resp.json()
+
+    async def cancel_submission(self, submission_id: int) -> Dict[str, Any]:
+        """Best-effort cancellation/cleanup used by "Отмена" button."""
+        url = f"{self.base_url}/api/tg/submissions/{submission_id}/cancel"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json={}, headers=self._headers(), timeout=30) as resp:
+                # even if backend says not found - treat as ok
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise RuntimeError(f"TrackRater cancel_submission failed: {resp.status} {text}")
+                return await resp.json()

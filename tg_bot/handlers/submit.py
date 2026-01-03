@@ -6,6 +6,7 @@ from ..states import SubmitTrack
 from ..keyboards.priority import priority_choice_kb
 from ..keyboards.payments import payment_method_kb
 from ..keyboards.main import main_menu_kb, check_sub_kb
+from ..keyboards.common import cancel_kb
 from ..services.subscription_check import check_subscription
 from ..services.trackrater_api import TrackRaterAPI
 from ..config import Settings
@@ -33,7 +34,10 @@ async def start_submit(call: CallbackQuery, state: FSMContext, settings: Setting
         return
     await state.clear()
     await state.set_state(SubmitTrack.waiting_file)
-    await call.message.answer("Отправьте аудиофайл (audio или document).")
+    await call.message.answer(
+        "Отправьте аудиофайл (audio или document).",
+        reply_markup=cancel_kb(),
+    )
 
 @router.message(SubmitTrack.waiting_file, F.audio | F.document)
 async def got_file(message: Message, state: FSMContext, settings: Settings, api: TrackRaterAPI):
@@ -71,12 +75,15 @@ async def got_file(message: Message, state: FSMContext, settings: Settings, api:
     # Prefill if we have both
     if performer and title_meta:
         await state.update_data(artist=performer, title=title_meta)
-        await message.answer(f"Нашёл метаданные:\n\n🎤 Исполнитель: {performer}\n🎵 Название: {title_meta}\n\nЕсли ок — просто отправьте любое слово 'да', или напишите исправленный ИСПОЛНИТЕЛЬ.",
-                             )
+        await message.answer(
+            f"Нашёл метаданные:\n\n🎤 Исполнитель: {performer}\n🎵 Название: {title_meta}\n\n"
+            "Если ок — просто отправьте любое слово 'да', или напишите исправленный ИСПОЛНИТЕЛЬ.",
+            reply_markup=cancel_kb(),
+        )
         await state.set_state(SubmitTrack.waiting_artist)
         return
 
-    await message.answer("Введите исполнителя:")
+    await message.answer("Введите исполнителя:", reply_markup=cancel_kb())
     await state.set_state(SubmitTrack.waiting_artist)
 
 @router.message(SubmitTrack.waiting_artist)
@@ -86,7 +93,7 @@ async def got_artist(message: Message, state: FSMContext):
         await message.answer("Введите исполнителя текстом.")
         return
     await state.update_data(artist=artist)
-    await message.answer("Введите название трека:")
+    await message.answer("Введите название трека:", reply_markup=cancel_kb())
     await state.set_state(SubmitTrack.waiting_title)
 
 @router.message(SubmitTrack.waiting_title)
@@ -103,7 +110,10 @@ async def got_title(message: Message, state: FSMContext, api: TrackRaterAPI):
     # persist metadata
     await api.set_metadata(submission_id, artist=artist, title=title)
 
-    await message.answer(f"✅ Принято:\n\n🎤 {artist}\n🎵 {title}\n\nВыберите приоритет:", reply_markup=priority_choice_kb(include_free=True))
+    await message.answer(
+        f"✅ Принято:\n\n🎤 {artist}\n🎵 {title}\n\nВыберите приоритет:",
+        reply_markup=priority_choice_kb(include_free=True),
+    )
     await state.set_state(SubmitTrack.choose_priority)
 
 @router.callback_query(SubmitTrack.choose_priority, F.data.startswith("prio:"))
@@ -129,3 +139,13 @@ async def choose_priority(call: CallbackQuery, state: FSMContext, settings: Sett
         reply_markup=payment_method_kb(submission_id, prio),
     )
     await state.set_state(SubmitTrack.choose_payment_method)
+
+
+@router.callback_query(SubmitTrack.choose_payment_method, F.data.startswith("nav:prio:"))
+async def back_to_priority(call: CallbackQuery, state: FSMContext, settings: Settings):
+    await call.answer()
+    if not await _require_sub(call, settings):
+        return
+    # just show priority choice again
+    await state.set_state(SubmitTrack.choose_priority)
+    await call.message.answer("Выберите приоритет:", reply_markup=priority_choice_kb(include_free=True))
