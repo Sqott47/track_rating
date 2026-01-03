@@ -28,7 +28,7 @@ def load_settings() -> Settings:
     if not base_url:
         raise RuntimeError("TRACKRATER_BASE_URL is required")
 
-    api_token = os.getenv("TRACKRATER_TG_BOT_TOKEN", "").strip()
+    api_token = os.getenv("TRACKRATER_TG_API_TOKEN", "").strip()
     if not api_token:
         raise RuntimeError("TRACKRATER_TG_BOT_TOKEN is required")
 
