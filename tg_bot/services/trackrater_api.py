@@ -29,8 +29,9 @@ class TrackRaterAPI:
         data = aiohttp.FormData()
         data.add_field("tg_user_id", str(int(tg_user_id)))
         data.add_field("tg_username", (tg_username or "").strip())
-        data.add_field("filename", filename)
-        data.add_field("ext", ext)
+        # Backend expects these exact field names (kept for backward/forward compatibility)
+        data.add_field("original_filename", filename)
+        data.add_field("original_ext", ext)
         data.add_field("file", file_bytes, filename=filename, content_type="application/octet-stream")
         async with aiohttp.ClientSession() as session:
             async with session.post(url, data=data, headers=self._headers(), timeout=180) as resp:

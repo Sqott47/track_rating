@@ -23,7 +23,29 @@ router = Router()
 def _ext_from_filename(name: str) -> str:
     base = (name or "").strip().lower()
     if "." in base:
-        return base.rsplit(".", 1)[-1]
+        return base.rsplit(".", 1)[-1].lstrip(".")
+    return ""
+
+
+def _ext_from_mime(mime: str | None) -> str:
+    """Best-effort mapping from Telegram mime types to file extensions."""
+    m = (mime or "").strip().lower()
+    if not m:
+        return ""
+    # common audio types
+    if m in {"audio/mpeg", "audio/mp3", "audio/x-mpeg"}:
+        return "mp3"
+    if m in {"audio/wav", "audio/x-wav", "audio/wave"}:
+        return "wav"
+    if m in {"audio/flac", "audio/x-flac"}:
+        return "flac"
+    if m in {"audio/ogg", "audio/opus", "application/ogg"}:
+        return "ogg"
+    if m in {"audio/aiff", "audio/x-aiff"}:
+        return "aiff"
+    if m in {"audio/mp4", "audio/m4a", "video/mp4"}:
+        # Telegram often reports m4a as audio/mp4
+        return "m4a"
     return ""
 
 def _is_allowed_ext(ext: str, settings: Settings) -> bool:
@@ -89,16 +111,31 @@ async def got_file(message: Message, state: FSMContext, settings: Settings, api:
     if message.audio:
         file_id = message.audio.file_id
         filename = message.audio.file_name or "track.mp3"
+        mime_type = getattr(message.audio, "mime_type", None)
     elif message.document:
         file_id = message.document.file_id
         filename = message.document.file_name or "track.bin"
+        mime_type = getattr(message.document, "mime_type", None)
     else:
         await message.answer("Это не похоже на аудиофайл. Пришли mp3/wav как файл.", reply_markup=cancel_kb())
         return
 
+    # Determine extension reliably: prefer filename, fallback to mime type.
     ext = _ext_from_filename(filename)
-    if ext and not _is_allowed_ext(ext, settings):
-        await message.answer(f"Расширение .{ext} не разрешено. Разрешены: {', '.join(settings.allowed_exts)}", reply_markup=cancel_kb())
+    if (not ext) or (ext and not _is_allowed_ext(ext, settings)):
+        mime_ext = _ext_from_mime(mime_type)
+        if mime_ext and _is_allowed_ext(mime_ext, settings):
+            ext = mime_ext
+            # ensure filename contains extension for server-side validators that look at filename
+            if not filename.lower().endswith(f".{ext}"):
+                filename = f"{filename}.{ext}" if "." not in filename else f"{filename.rsplit('.', 1)[0]}.{ext}"
+
+    if not ext or not _is_allowed_ext(ext, settings):
+        shown = ext or "(не удалось определить)"
+        await message.answer(
+            f"Расширение {shown} не разрешено или не распознано. Разрешены: {', '.join(settings.allowed_exts)}",
+            reply_markup=cancel_kb(),
+        )
         return
 
     # Download bytes
@@ -122,7 +159,7 @@ async def got_file(message: Message, state: FSMContext, settings: Settings, api:
             tg_user_id=user.id,
             tg_username=user.username,
             filename=filename,
-            ext=ext or "bin",
+            ext=ext,
             file_bytes=file_bytes,
         )
     except Exception as e:
@@ -136,7 +173,7 @@ async def got_file(message: Message, state: FSMContext, settings: Settings, api:
         await state.clear()
         return
 
-    await state.update_data(submission_id=submission_id, filename=filename, ext=ext or "bin")
+    await state.update_data(submission_id=submission_id, filename=filename, ext=ext)
     await state.set_state(SubmitTrack.waiting_artist)
     await message.answer("Введите исполнителя:", reply_markup=cancel_kb())
 
