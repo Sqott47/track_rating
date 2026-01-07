@@ -91,7 +91,7 @@ async def menu_submit(call: CallbackQuery, state: FSMContext, settings: Settings
     await state.update_data(started_at=_started_at())
     await state.set_state(SubmitTrack.waiting_file)
     await call.message.answer(
-        "Отправь аудиофайл (mp3/wav/...) одним сообщением.",
+        "Отправь аудиофайл (mp3/wav/...) одним сообщением. Аудиофайл должен весить меньше 20MB, ограничения телеграмма 😔",
         reply_markup=cancel_kb(),
     )
 
