@@ -32,7 +32,25 @@ def sniff_audio_kind(data: bytes, filename: str | None = None) -> str:
 
 async def _which(cmd: str) -> Optional[str]:
     # asyncio-friendly which
-    for p in os.getenv("PATH", "").split(os.pathsep):
+    # NOTE: systemd units often run with a very minimal PATH (e.g. only venv/bin).
+    # Add common system locations so ffmpeg can be found even when PATH is restricted.
+    raw_paths = [p for p in os.getenv("PATH", "").split(os.pathsep) if p]
+    raw_paths += [
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ]
+
+    seen = set()
+    paths: list[str] = []
+    for p in raw_paths:
+        if p not in seen:
+            seen.add(p)
+            paths.append(p)
+
+    for p in paths:
         cand = os.path.join(p, cmd)
         if os.path.isfile(cand) and os.access(cand, os.X_OK):
             return cand
