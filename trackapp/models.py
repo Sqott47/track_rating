@@ -281,6 +281,80 @@ class PasswordResetToken(db.Model):
     def is_valid(self) -> bool:
         return self.used_at is None and self.expires_at > datetime.utcnow()
 
+
+# -----------------
+# Awards (Премии)
+# -----------------
+
+
+class Award(db.Model):
+    """Award created from the UI (admin).
+
+    Mechanics:
+    - Left column: list of awards (CRUD)
+    - Center: nominees (tracks) + listen + set winner
+    - Right: fixed winner block (snapshot)
+    """
+
+    __tablename__ = "awards"
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    # Emoji badge used in top/track pages (instead of long text)
+    icon_emoji = db.Column(db.String(16), nullable=True)
+    # Optional image displayed in awards list / nomination list
+    image_path = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(16), nullable=False, default="active")  # draft|active|ended
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    winner_nomination_id = db.Column(db.Integer, db.ForeignKey("award_nominations.id"), nullable=True)
+    # Snapshot for stable display even if the track changes/deletes later.
+    # Store JSON as TEXT for SQLite compatibility.
+    winner_snapshot_json = db.Column(db.Text, nullable=True)
+
+    created_by = db.relationship("User", lazy="joined", foreign_keys=[created_by_user_id])
+
+    # There are TWO FK paths between awards and award_nominations:
+    # - AwardNomination.award_id -> Award.id
+    # - Award.winner_nomination_id -> AwardNomination.id
+    # SQLAlchemy needs an explicit hint for relationships to avoid ambiguity.
+    winner_nomination = db.relationship(
+        "AwardNomination",
+        foreign_keys=[winner_nomination_id],
+        lazy="joined",
+        post_update=True,
+    )
+
+
+class AwardNomination(db.Model):
+    __tablename__ = "award_nominations"
+
+    id = db.Column(db.Integer, primary_key=True)
+    award_id = db.Column(db.Integer, db.ForeignKey("awards.id"), nullable=False, index=True)
+    track_id = db.Column(db.Integer, db.ForeignKey("tracks.id"), nullable=False, index=True)
+    nominated_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
+    nominated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("award_id", "track_id", name="ux_award_nominations_award_track"),
+    )
+
+    award = db.relationship(
+        "Award",
+        foreign_keys=[award_id],
+        backref=db.backref(
+            "nominations",
+            lazy="dynamic",
+            cascade="all, delete-orphan",
+            # Make the backref also use the correct FK path.
+            foreign_keys="AwardNomination.award_id",
+        ),
+    )
+    track = db.relationship("Track", lazy="joined")
+    nominated_by = db.relationship("User", lazy="joined", foreign_keys=[nominated_by_user_id])
+
 def _sqlite_has_column(table: str, col: str) -> bool:
     """Check column existence for in-place sqlite migrations."""
     try:
@@ -356,6 +430,14 @@ def _run_sqlite_migrations():
                 """
             )
         )
+        db.session.commit()
+    except Exception:
+        pass
+
+    # Awards UI: add columns if DB existed before awards patch
+    try:
+        _sqlite_add_column("awards", "icon_emoji", "VARCHAR(16)")
+        _sqlite_add_column("awards", "image_path", "TEXT")
         db.session.commit()
     except Exception:
         pass

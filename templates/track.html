@@ -22,11 +22,34 @@
             <div class="track-hero-header">
                 <div>
                     <h1 class="track-title">{{ track.name }}</h1>
+                    {% if award_wins and award_wins|length %}
+                        {% set b = award_wins[0] %}
+                        <div style="margin-top:8px;">
+                            <span class="award-tag award-tag--win">{{ b.emoji }} Победитель: {{ b.title }}</span>
+                        </div>
+                    {% elif award_noms and award_noms|length %}
+                        {% set b = award_noms[0] %}
+                        <div style="margin-top:8px;">
+                            <span class="award-tag">{{ b.emoji }} Номинант: {{ b.title }}</span>
+                        </div>
+                    {% endif %}
                     <p class="track-meta">
                         Добавлен: {{ track.created_at.strftime('%d.%m.%Y %H:%M') if track.created_at else 'Дата неизвестна' }}
                     </p>
                 </div>
                 <div class="track-hero-actions">
+                    {% if is_admin and active_awards and active_awards|length %}
+                        <details class="nominate-menu" style="margin-right:10px;">
+                            <summary class="btn-ghost" style="padding:10px 12px;">🏅 Номинировать</summary>
+                            <div class="nominate-menu__panel">
+                                {% for a in active_awards %}
+                                    <form method="post" action="{{ url_for('award_nominate', award_id=a.id, track_id=track.id) }}">
+                                        <button type="submit" class="nominate-menu__item">В «{{ a.title }}»</button>
+                                    </form>
+                                {% endfor %}
+                            </div>
+                        </details>
+                    {% endif %}
                     {# оценки пользователей теперь привязаны к рецензиям ниже #}
                     <div class="track-share-wrapper">
                         <button type="button"

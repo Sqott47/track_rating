@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Премии · ANTIGAZ{% endblock %}
+
+{% block content %}
+<div class="page-content">
+  <section class="top-panel">
+    <div class="top-panel-main">
+      <div class="top-panel-label">Премии</div>
+      <p class="top-panel-subtext">Это что, премия АНТИГАЗ?</p>
+    </div>
+  </section>
+
+  <section class="awards-layout">
+    <aside class="awards-col awards-col--left">
+      <div class="awards-col-head">
+        <div class="awards-col-title">Список премий</div>
+        {% if is_admin %}
+          <button class="btn-ghost" type="button" onclick="document.getElementById('award-create').classList.toggle('is-open')">+ Создать</button>
+        {% endif %}
+      </div>
+
+      {% if is_admin %}
+      <div class="award-create" id="award-create">
+        <form method="post" action="{{ url_for('awards_create') }}" data-turbo="false" enctype="multipart/form-data">
+          <div class="form-row">
+            <label class="field-label">Название</label>
+            <input class="field-input" name="title" maxlength="255" placeholder="Например: Трек месяца" required>
+          </div>
+          <div class="form-row">
+            <label class="field-label">Смайлик (для топа)</label>
+            <input class="field-input" name="icon_emoji" maxlength="16" placeholder="🏆">
+            <div class="field-hint">В топе будет показываться только этот смайлик + tooltip.</div>
+          </div>
+          <div class="form-row">
+            <label class="field-label">Картинка (опц.)</label>
+            <input class="field-input" type="file" name="image" accept="image/*">
+          </div>
+          <div class="form-row">
+            <label class="field-label">Описание (опц.)</label>
+            <textarea class="field-input" name="description" rows="2" placeholder="Коротко о премии"></textarea>
+          </div>
+          <div class="form-actions">
+            <button class="btn-primary" type="submit">Создать премию</button>
+          </div>
+        </form>
+      </div>
+      {% endif %}
+
+      <div class="awards-list" id="awards-list">
+        {% if awards %}
+          {% for a in awards %}
+            <div class="award-item {% if selected_award and selected_award.id == a.id %}is-active{% endif %}" data-award-item>
+              <a class="award-link"
+                 href="{{ url_for('awards_panel', award_id=a.id) }}"
+                 data-award-link
+                 data-award-id="{{ a.id }}"
+                 data-award-title="{{ a.title|e }}"
+                 data-award-description="{{ (a.description or '')|e }}"
+                 data-award-emoji="{{ (a.icon_emoji or '')|e }}"
+                 data-award-image="{{ (a.image_path or '')|e }}"
+                 data-turbo-frame="award-panel">
+                <div class="award-link-main">
+                  {% if a.image_path %}
+                    <img class="award-thumb" src="{{ a.image_path }}" alt="" onerror="this.style.display='none';">
+                  {% endif %}
+                  <div class="award-link-text">
+                    <div class="award-link-title">{{ a.title }}</div>
+                    {% if a.description %}
+                      <div class="award-link-desc">{{ a.description }}</div>
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="award-link-meta">
+                  <span class="award-count">{{ a.nominations.count() }}</span>
+                </div>
+              </a>
+
+              {% if is_admin %}
+              <div class="award-item-actions">
+                <button type="button" class="btn-ghost btn-mini award-edit-btn" title="Редактировать" data-award-edit>✏️</button>
+                <form method="post" action="{{ url_for('awards_delete', award_id=a.id) }}" data-turbo="false" onsubmit="return confirm('Удалить премию «{{ a.title|e }}»?');">
+                  <button type="submit" class="btn-ghost btn-mini" title="Удалить">🗑</button>
+                </form>
+              </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="field-hint">Пока премий нет.</div>
+        {% endif %}
+      </div>
+    </aside>
+
+    {% if is_admin %}
+      <div class="award-modal" id="award-edit-modal" hidden>
+        <div class="award-modal__backdrop" data-award-modal-close></div>
+        <div class="award-modal__card">
+          <div class="award-modal__head">
+            <div class="award-modal__title">Редактировать премию</div>
+            <button type="button" class="btn-ghost" data-award-modal-close>✕</button>
+          </div>
+          <form id="award-edit-form" method="post" action="" enctype="multipart/form-data" data-turbo="false">
+            <div class="form-row">
+              <label class="field-label">Название</label>
+              <input class="field-input" name="title" id="award-edit-title" maxlength="255" required>
+            </div>
+            <div class="form-row">
+              <label class="field-label">Смайлик (для топа)</label>
+              <input class="field-input" name="icon_emoji" id="award-edit-emoji" maxlength="16" placeholder="🏆">
+            </div>
+            <div class="form-row">
+              <label class="field-label">Описание (опц.)</label>
+              <textarea class="field-input" name="description" id="award-edit-description" rows="2"></textarea>
+            </div>
+            <div class="form-row">
+              <label class="field-label">Картинка (опц.)</label>
+              <input class="field-input" type="file" name="image" accept="image/*">
+              <label class="field-hint" style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                <input type="checkbox" name="clear_image" value="1"> Убрать текущую картинку
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="btn-primary" type="submit">Сохранить</button>
+              <button class="btn-ghost" type="button" data-award-modal-close>Отмена</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    {% endif %}
+
+    <turbo-frame id="award-panel" class="awards-col awards-col--panel" src="{% if selected_award %}{{ url_for('awards_panel', award_id=selected_award.id) }}{% endif %}">
+      <div class="award-panel-empty">Выбери премию слева.</div>
+    </turbo-frame>
+  </section>
+</div>
+{% endblock %}

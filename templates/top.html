@@ -57,6 +57,23 @@
                         <td class="top-pos" data-label="#">{{ t.position }}</td>
                         <td class="top-name-cell" data-label="Трек">
                             <span class="top-name-text">{{ t.name }}</span>
+                            {% if t.award_wins and t.award_wins|length %}
+                                {% set b = t.award_wins[0] %}
+                                <span class="award-pill award-pill--win rt-tooltip-target"
+                                      data-rt-tooltip="win"
+                                      data-rt-award="{{ b.title|e }}"
+                                      data-rt-kind="Победитель">
+                                    <span class="award-pill-emoji">{{ b.emoji }}</span>
+                                </span>
+                            {% elif t.award_noms and t.award_noms|length %}
+                                {% set b = t.award_noms[0] %}
+                                <span class="award-pill rt-tooltip-target"
+                                      data-rt-tooltip="nom"
+                                      data-rt-award="{{ b.title|e }}"
+                                      data-rt-kind="Номинант">
+                                    <span class="award-pill-emoji">{{ b.emoji }}</span>
+                                </span>
+                            {% endif %}
                             {% if is_admin %}
                             <span class="top-row-actions">
                                 <button type="button"
@@ -73,6 +90,7 @@
                                         data-track-name="{{ t.name }}">
                                     🗑
                                 </button>
+
                             </span>
                             {% endif %}
                         </td>

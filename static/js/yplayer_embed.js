@@ -151,4 +151,6 @@
 
   // turbo:load fires on initial page load and after every Turbo visit.
   document.addEventListener("turbo:load", initAll);
+  // turbo:frame-load fires when a turbo-frame finishes loading new content.
+  document.addEventListener("turbo:frame-load", initAll);
 })();

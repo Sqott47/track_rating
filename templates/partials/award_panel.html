@@ -1,0 +1,88 @@
+<turbo-frame id="award-panel">
+<div class="awards-col awards-col--center">
+  <div class="awards-col-head">
+    <div>
+      <div class="awards-col-title">
+        {% if award.image_path %}
+          <img class="award-panel-thumb" src="{{ award.image_path }}" alt="">
+        {% endif %}
+        {{ award.title }}
+      </div>
+      {% if award.description %}
+        <div class="field-hint">{{ award.description }}</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="award-nominees">
+    {% if nominees %}
+      {% for it in nominees %}
+        {% set nom = it.nom %}
+        {% set t = it.track %}
+        <div class="award-nominee-card">
+          <div class="award-nominee-head">
+            <a class="award-nominee-title" href="{{ url_for('track_page', track_id=t.id) }}" data-turbo-frame="_top">{{ t.name }}</a>
+            <div class="award-nominee-actions">
+              {% if is_admin %}
+                <form method="post" action="{{ url_for('award_set_winner', award_id=award.id, nom_id=nom.id) }}">
+                  <button type="submit" class="btn-primary btn-mini">Победил</button>
+                </form>
+                <form method="post" action="{{ url_for('award_remove_nomination', nom_id=nom.id) }}">
+                  <button type="submit" class="btn-ghost btn-mini">Убрать</button>
+                </form>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if it.audio_url %}
+            <div class="award-nominee-player">
+              {% set audio_src = it.audio_url %}
+              {% set player_id = "award-player-" ~ nom.id %}
+              {% set player_title = it.player_title %}
+              {% set player_subtitle = it.player_subtitle %}
+              {% include "partials/yplayer_embed.html" %}
+            </div>
+          {% else %}
+            <div class="field-hint">Нет файла для прослушивания (трек без submission).</div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="award-panel-empty">Пока нет номинантов.</div>
+    {% endif %}
+  </div>
+</div>
+
+<aside class="awards-col awards-col--right">
+  <div class="awards-col-head">
+    <div class="awards-col-title">Итог</div>
+  </div>
+
+  {% if winner %}
+    <div class="award-winner-card">
+      <div class="award-winner-label">Победитель</div>
+      <div class="award-winner-title">
+        {% if winner.track_id %}
+          <a class="award-track-link" data-turbo-frame="_top" href="{{ url_for('track_page', track_id=winner.track_id) }}">{{ winner.track_name }}</a>
+        {% else %}
+          {{ winner.track_name }}
+        {% endif %}
+      </div>
+      {% if winner.winner_at %}
+        <div class="field-hint">Назначено: {{ winner.winner_at[:19].replace('T',' ') }}</div>
+      {% endif %}
+
+      {% if is_admin %}
+        <form method="post" action="{{ url_for('award_unset_winner', award_id=award.id) }}" style="margin-top:12px;">
+          <button type="submit" class="btn-ghost">Снять победителя</button>
+        </form>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="award-winner-card">
+      <div class="award-winner-label">Победитель не выбран</div>
+      <div class="field-hint">Ожидаем выбора победителя.</div>
+    </div>
+  {% endif %}
+</aside>
+</turbo-frame>

@@ -6,9 +6,9 @@ var queueUIBusyTimer = null;
 
 var pendingQueuePayload = null;
 (function () {
-    var socket = null;
-    var socketInited = false;
-
+    // Socket.IO singleton (prevents many parallel connections on Turbo navigation)
+    var socket = (typeof window !== "undefined" && window.__APP_SOCKET__) ? window.__APP_SOCKET__ : null;
+    var socketInited = !!socket;
     var state = {
         track_name: "",
         raters: {},
@@ -1226,7 +1226,7 @@ if (queueUIBusy) {
             playBtn.dataset.bound = "1";
             playBtn.addEventListener("click", function () {
                 // Админ управляет синхро‑плеером (play/pause). Не‑админ — только «разрешает звук» (user gesture).
-                if (!IS_ADMIN) {
+                if (!isAdmin) {
                     var a = getSyncAudioEl();
                     if (a) {
                         var p = a.play();
@@ -1256,7 +1256,7 @@ if (queueUIBusy) {
         if (stopBtn && stopBtn.dataset.bound !== "1") {
             stopBtn.dataset.bound = "1";
             stopBtn.addEventListener("click", function () {
-                if (!IS_ADMIN) return;
+                if (!isAdmin) return;
                 if (socket) socket.emit("admin_playback_cmd", { action: "stop" });
             });
         }
@@ -1274,7 +1274,7 @@ if (queueUIBusy) {
                 var dur = a2 && isFinite(a2.duration) ? a2.duration : 0;
                 if (!dur) return;
                 var targetMs = Math.floor(dur * ratio * 1000);
-                if (IS_ADMIN && socket) socket.emit("admin_playback_cmd", { action: "seek", position_ms: targetMs });
+                if (isAdmin && socket) socket.emit("admin_playback_cmd", { action: "seek", position_ms: targetMs });
                 else {
                     // Не‑админ: только локально отображаем (без изменения синхры)
                     try { a2.currentTime = dur * ratio; } catch(e) {}
@@ -1294,7 +1294,7 @@ if (queueUIBusy) {
                     e.preventDefault();
                     var next = a2.currentTime + (e.key === "ArrowRight" ? step : -step);
                     next = Math.max(0, Math.min(dur, next));
-                    if (IS_ADMIN && socket) socket.emit("admin_playback_cmd", { action: "seek", position_ms: Math.floor(next * 1000) });
+                    if (isAdmin && socket) socket.emit("admin_playback_cmd", { action: "seek", position_ms: Math.floor(next * 1000) });
                 }
             });
         }
@@ -1509,8 +1509,31 @@ function initSocket() {
             console.error("Socket.IO script not loaded");
             return;
         }
-        socket = io();
-        try { window.__APP_SOCKET__ = socket; } catch(e) {}
+        // Reuse existing singleton if present (Turbo can keep previous page in memory).
+        try {
+            if (typeof window !== "undefined" && window.__APP_SOCKET__) {
+                socket = window.__APP_SOCKET__;
+            }
+        } catch (e) {}
+
+        if (!socket) {
+            socket = io();
+            try { window.__APP_SOCKET__ = socket; } catch (e) {}
+        }
+
+        // Bind handlers only once per socket instance.
+        // Otherwise, if initSocket is ever called again, we'd stack listeners and duplicate events.
+        try {
+            if (socket.__trBound) {
+                // Ensure the correct room membership for the current page.
+                if (isPanelPage) socket.emit("enter_panel");
+                else socket.emit("leave_panel");
+                // Also refresh state if we're already connected.
+                if (socket.connected) socket.emit("request_initial_state");
+                return;
+            }
+            socket.__trBound = true;
+        } catch (e) {}
 
         socket.on("connect", function () {
     console.log("[socket] connected");
@@ -2205,4 +2228,171 @@ function openTrackDetailsModal(trackId) {
     }
 
 
+})();
+
+// -----------------------------
+// Awards UI (left list highlight + edit modal)
+// -----------------------------
+(function () {
+  function qs(sel, root) { return (root || document).querySelector(sel); }
+  function qsa(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
+
+  function setActiveAward(awardId) {
+    qsa('[data-award-item]').forEach((el) => {
+      const link = el.querySelector('[data-award-link]');
+      const id = link ? (link.getAttribute('data-award-id') || '') : '';
+      el.classList.toggle('is-active', id === String(awardId));
+    });
+  }
+
+  function openAwardModal(linkEl) {
+    const modal = qs('#award-edit-modal');
+    const form = qs('#award-edit-form');
+    if (!modal || !form || !linkEl) return;
+
+    const awardId = linkEl.getAttribute('data-award-id');
+    const title = linkEl.getAttribute('data-award-title') || '';
+    const desc = linkEl.getAttribute('data-award-description') || '';
+    const emoji = linkEl.getAttribute('data-award-emoji') || '';
+
+    form.action = `/awards/${awardId}/update`;
+    const t = qs('#award-edit-title');
+    const d = qs('#award-edit-description');
+    const e = qs('#award-edit-emoji');
+    if (t) t.value = title;
+    if (d) d.value = desc;
+    if (e) e.value = emoji;
+
+    modal.hidden = false;
+    document.body.classList.add('modal-open');
+  }
+
+  function closeAwardModal() {
+    const modal = qs('#award-edit-modal');
+    if (!modal) return;
+    modal.hidden = true;
+    document.body.classList.remove('modal-open');
+  }
+
+  function bindAwardsUI() {
+    // Highlight stays correct even though only the frame updates.
+    qsa('[data-award-link]').forEach((a) => {
+      a.addEventListener('click', () => setActiveAward(a.getAttribute('data-award-id')));
+    });
+
+    // Edit modal buttons
+    qsa('[data-award-edit]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const item = btn.closest('[data-award-item]');
+        const linkEl = item ? item.querySelector('[data-award-link]') : null;
+        openAwardModal(linkEl);
+      });
+    });
+
+    // Close modal
+    qsa('[data-award-modal-close]').forEach((el) => {
+      el.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        closeAwardModal();
+      });
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') closeAwardModal();
+    });
+  }
+
+  document.addEventListener('turbo:load', bindAwardsUI);
+  document.addEventListener('DOMContentLoaded', bindAwardsUI);
+})();
+// =========================
+// Awards: emoji tooltip portal (not clipped by overflow)
+// =========================
+(function(){
+  function ensureTooltip(){
+    let el = document.getElementById('rt-tooltip-portal');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'rt-tooltip-portal';
+      el.className = 'rt-tooltip-portal';
+      el.innerHTML = '<div class="award-tooltip-title"></div><div class="award-tooltip-sub"></div>';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  const OFFSET_Y = 12;
+
+  function showTooltip(target){
+    const el = ensureTooltip();
+    const kind = (target.getAttribute('data-rt-kind') || '').trim();
+    const award = (target.getAttribute('data-rt-award') || '').trim();
+
+    el.querySelector('.award-tooltip-title').textContent = `${target.getAttribute('data-rt-tooltip') === 'win' ? '🏆' : '🎖'} ${kind}`;
+    el.querySelector('.award-tooltip-sub').textContent = `Премия: ${award}`;
+
+    const rect = target.getBoundingClientRect();
+    // center horizontally, above the icon
+    const x = rect.left + rect.width / 2;
+
+    // Make sure it is measurable (but still hidden)
+    el.classList.remove('is-visible');
+    el.style.visibility = 'hidden';
+    el.style.left = '0px';
+    el.style.top = '0px';
+
+    // Measure and position first, then fade/slide in from that spot
+    requestAnimationFrame(() => {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      let left = x - w / 2;
+      let top = rect.top - h - OFFSET_Y;
+
+      const pad = 10;
+      left = Math.max(pad, Math.min(left, window.innerWidth - w - pad));
+
+      if (top < pad) {
+        top = rect.bottom + OFFSET_Y;
+        el.classList.add('is-below');
+      } else {
+        el.classList.remove('is-below');
+      }
+
+      el.style.left = `${Math.round(left)}px`;
+      el.style.top = `${Math.round(top)}px`;
+      el.style.visibility = 'visible';
+
+      // Trigger transition from the correct position (no "fly-in" from the corner)
+      requestAnimationFrame(() => el.classList.add('is-visible'));
+    });
+  }
+
+  function hideTooltip(){
+    const el = document.getElementById('rt-tooltip-portal');
+    if(el){
+      el.classList.remove('is-visible');
+    }
+  }
+
+  function bind(){
+    document.addEventListener('mouseenter', (e) => {
+      const t = e.target.closest && e.target.closest('.rt-tooltip-target');
+      if(t) showTooltip(t);
+    }, true);
+
+    document.addEventListener('mouseleave', (e) => {
+      const t = e.target.closest && e.target.closest('.rt-tooltip-target');
+      if(t) hideTooltip();
+    }, true);
+
+    window.addEventListener('scroll', hideTooltip, true);
+    window.addEventListener('resize', hideTooltip);
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', bind);
+  } else {
+    bind();
+  }
 })();

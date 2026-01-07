@@ -40,6 +40,10 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 NEWS_UPLOAD_DIR = os.path.join(UPLOAD_DIR, "news")
 os.makedirs(NEWS_UPLOAD_DIR, exist_ok=True)
 
+# Awards images
+AWARDS_UPLOAD_DIR = os.path.join(UPLOAD_DIR, "awards")
+os.makedirs(AWARDS_UPLOAD_DIR, exist_ok=True)
+
 ALLOWED_NEWS_TAGS = [
     "p",
     "br",
