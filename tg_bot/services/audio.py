@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 
 # Magic bytes helpers
 
-def sniff_audio_kind(data: bytes) -> str:
+def sniff_audio_kind(data: bytes, filename: str | None = None) -> str:
     """Return best-effort kind: mp3|wav|flac|ogg|unknown."""
     if not data:
         return "unknown"
