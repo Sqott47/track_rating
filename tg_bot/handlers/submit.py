@@ -154,17 +154,20 @@ async def got_file(message: Message, state: FSMContext, settings: Settings, api:
         return
     # Normalize audio to real MP3 (people often rename WAV -> .mp3)
     try:
-        kind = sniff_audio_kind(file_bytes, filename or '')
-        if kind != 'mp3':
-            file_bytes = convert_bytes_to_mp3(file_bytes)
-            ext = 'mp3'
+        kind = sniff_audio_kind(file_bytes, filename or "")
+        # convert everything except real mp3
+        if kind != "mp3":
+            # convert_bytes_to_mp3 requires explicit input_ext (keyword-only) and is async
+            input_ext = kind if kind != "unknown" else ext
+            file_bytes = await convert_bytes_to_mp3(file_bytes, input_ext=input_ext)
+            ext = "mp3"
             # keep basename but force .mp3
-            base = os.path.splitext(filename or 'track')[0]
+            base = os.path.splitext(filename or "track")[0]
             filename = f"{base}.mp3"
         else:
             # even if filename has a weird extension, store as mp3 on server side
-            ext = 'mp3'
-            if filename and not filename.lower().endswith('.mp3'):
+            ext = "mp3"
+            if filename and not filename.lower().endswith(".mp3"):
                 base = os.path.splitext(filename)[0]
                 filename = f"{base}.mp3"
     except Exception as e:
