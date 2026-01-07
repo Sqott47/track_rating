@@ -630,6 +630,8 @@ def handle_evaluate():
     if not _require_admin():
         return
 
+    rater_results = []
+
     with state_lock:
         track_name = shared_state["track_name"] or "Без названия"
         active_submission_id = shared_state.get("active_submission_id")

@@ -17,6 +17,39 @@ var pendingQueuePayload = null;
     // Map rater_id -> user_id (used for admin kick button; some server snapshots may omit user_id in rater payload)
     window.__RATER_USER_MAP__ = window.__RATER_USER_MAP__ || {};
 
+    // Update kick button targets (data-user-id) without re-rendering panels.
+    window.updateKickButtonTargets = window.updateKickButtonTargets || function () {
+        try {
+            var buttons = document.querySelectorAll(".btn-kick-rater[data-rater-id]");
+            buttons.forEach(function (btn) {
+                var rid = btn.getAttribute("data-rater-id");
+                if (!rid) return;
+                var uid = (window.__RATER_USER_MAP__ && window.__RATER_USER_MAP__[String(rid)]) ? window.__RATER_USER_MAP__[String(rid)] : null;
+                if (uid) btn.setAttribute("data-user-id", String(uid));
+            });
+        } catch (e) {}
+    };
+
+    // Enable sliders only on "my" panel once join info arrives, without re-rendering.
+    window.updateEditablePanels = window.updateEditablePanels || function () {
+        try {
+            var myRaterId = (window.__MY_RATER_ID__ != null) ? String(window.__MY_RATER_ID__) : null;
+            var inRating = !!window.__IN_RATING__;
+            var panels = document.querySelectorAll(".rating-panel[data-rater-id]");
+            panels.forEach(function (panel) {
+                var rid = panel.getAttribute("data-rater-id");
+                var editable = !!(inRating && myRaterId && rid && String(rid) === myRaterId);
+                var sliders = panel.querySelectorAll("input.score-slider");
+                sliders.forEach(function (sl) {
+                    sl.disabled = !editable;
+                    if (!editable) sl.title = "Можно менять только свой слот";
+                    else sl.title = "";
+                });
+            });
+        } catch (e) {}
+    };
+
+
     // Очередь треков + синхро‑плеер (используется только на /panel)
     var queueState = { items: [], counts: {} };
     var playbackState = { active: null, playback: { is_playing: false, position_ms: 0 } };
@@ -1505,6 +1538,8 @@ socket.on("connect_error", function (err) {
             try { window.__MY_RATER_ID__ = payload && payload.rater_id ? String(payload.rater_id) : null; } catch (e) {}
             try { window.__MY_USER_ID__ = payload && payload.user_id ? String(payload.user_id) : null; } catch (e) {}
             refreshRatingButtons();
+            if (window.updateEditablePanels) window.updateEditablePanels();
+            if (window.updateKickButtonTargets) window.updateKickButtonTargets();
         });
 
         socket.on("rating_left", function () {
@@ -1546,9 +1581,11 @@ socket.on("connect_error", function (err) {
                     }
                 });
             } catch (e) {}
+
+            // Update UI without full re-render (avoids re-playing "appear" animations).
             refreshRatingButtons();
-            // Re-render panels so admin kick buttons can appear when user_id becomes known.
-            renderAllPanels();
+            if (window.updateKickButtonTargets) window.updateKickButtonTargets();
+            if (window.updateEditablePanels) window.updateEditablePanels();
         });
 
 
@@ -1569,6 +1606,8 @@ socket.on("connect_error", function (err) {
             }
             updateTrackNameDisplays(state.track_name);
             renderAllPanels();
+            if (window.updateEditablePanels) window.updateEditablePanels();
+            if (window.updateKickButtonTargets) window.updateKickButtonTargets();
         });
 
         socket.on("queue_state", function (payload) {

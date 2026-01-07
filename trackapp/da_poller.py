@@ -81,15 +81,19 @@ def _match_and_apply(donation: dict, pending: list[TrackSubmission]) -> int:
             if amount_i < required:
                 continue
             # Finalize storage only for new submissions not enqueued yet
-            if (sub.status or "") not in ("queued", "playing"):
-                try:
-                    from .routes import _finalize_tmp_to_storage
-                    _finalize_tmp_to_storage(sub)
-                except Exception:
-                    pass
-
+            # Ensure raw file is finalized to storage/S3 for paid submissions.
+            # We try regardless of current status; if tmp already gone, ignore FileNotFoundError.
+            try:
+                from .routes import _finalize_tmp_to_storage
+                _finalize_tmp_to_storage(sub)
+            except FileNotFoundError:
+                # Already finalized or tmp cleaned up
+                pass
+            except Exception:
+                app.logger.exception("[DA poller] finalize failed for submission_id=%s file_uuid=%s", sub.id, sub.file_uuid)
             # Apply priority only on successful payment
             sub.priority = required
+            sub.priority_set_at = datetime.utcnow()
             if (sub.status or "") != "playing":
                 sub.status = "queued"
             sub.payment_status = "paid"
@@ -108,7 +112,7 @@ def _match_and_apply(donation: dict, pending: list[TrackSubmission]) -> int:
             from .routes import _broadcast_queue_state
             _broadcast_queue_state()
         except Exception:
-            pass
+            app.logger.exception("[DA poller] broadcast queue state failed")
     return hits
 
 

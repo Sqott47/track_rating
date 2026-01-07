@@ -17,6 +17,7 @@ from ..keyboards.common import cancel_kb
 from ..keyboards.payments import payment_method_kb
 from ..services.subscription_check import check_subscription
 from ..services.trackrater_api import TrackRaterAPI
+from ..services.audio import sniff_audio_kind, convert_bytes_to_mp3
 
 router = Router()
 
@@ -151,6 +152,30 @@ async def got_file(message: Message, state: FSMContext, settings: Settings, api:
     if not file_bytes:
         await message.answer("Файл пустой или не скачался. Попробуй ещё раз.", reply_markup=cancel_kb())
         return
+    # Normalize audio to real MP3 (people often rename WAV -> .mp3)
+    try:
+        kind = sniff_audio_kind(file_bytes, filename or '')
+        if kind != 'mp3':
+            file_bytes = convert_bytes_to_mp3(file_bytes)
+            ext = 'mp3'
+            # keep basename but force .mp3
+            base = os.path.splitext(filename or 'track')[0]
+            filename = f"{base}.mp3"
+        else:
+            # even if filename has a weird extension, store as mp3 on server side
+            ext = 'mp3'
+            if filename and not filename.lower().endswith('.mp3'):
+                base = os.path.splitext(filename)[0]
+                filename = f"{base}.mp3"
+    except Exception as e:
+        await message.answer(
+            "Не получилось обработать аудио. "
+            "Проверь, что это реальный аудиофайл (часто кидают WAV, переименованный в .mp3). "
+            f"Ошибка: {e}",
+            reply_markup=cancel_kb(),
+        )
+        return
+
 
     user = message.from_user
     assert user is not None
