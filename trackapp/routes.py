@@ -5,6 +5,7 @@ Why explicit imports below?
 We still call several internal helpers (e.g. `_init_default_raters`) from
 the legacy code, so we import them explicitly to keep behaviour identical.
 """
+from sqlalchemy.sql.functions import current_user
 
 from .core import *  # noqa: F401,F403
 
@@ -37,8 +38,32 @@ import re
 import os
 import uuid
 
+import requests
+
 from .mailer import generate_token, sha256_hex, resend_send_email
 import json
+
+# Telegram notifications (best-effort).
+# Track submissions created via the Telegram bot store the sender in track_submissions.tg_user_id.
+# We use it to notify the author about award nominations and wins. This MUST NOT raise.
+TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "").strip()
+
+
+def _notify_submission_tg(sub: TrackSubmission | None, text: str) -> None:
+    if not TG_BOT_TOKEN or not sub or not sub.tg_user_id:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": int(sub.tg_user_id),
+                "text": text,
+                "disable_web_page_preview": True,
+            },
+            timeout=7,
+        )
+    except Exception:
+        pass
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -2836,6 +2861,17 @@ def award_nominate(award_id: int, track_id: int):
     db.session.commit()
     flash("Трек номинирован", "success")
 
+    # Best-effort Telegram notify to the author who submitted the track via TG bot.
+    try:
+        sub = None
+        if getattr(track, "submission_id", None):
+            sub = db.session.get(TrackSubmission, int(track.submission_id))
+        track_title = f"{sub.artist} — {sub.title}" if sub else (getattr(track, "name", "—") or "—")
+        _notify_submission_tg(sub, f"🏆 Твой трек номинирован в премии «{award.title}»\n🎵 {track_title}")
+    except Exception:
+        pass
+
+
     # If nomination happens from the awards page, keep user there.
     if request.headers.get("Turbo-Frame") == "award-panel":
         return redirect(url_for("awards_panel", award_id=award_id))
@@ -2864,6 +2900,17 @@ def award_remove_nomination(nom_id: int):
 
     db.session.delete(nom)
     db.session.commit()
+
+    # Best-effort Telegram notify to the author who submitted the track via TG bot.
+    try:
+        t = nom.track
+        sub = None
+        if t and getattr(t, "submission_id", None):
+            sub = db.session.get(TrackSubmission, int(t.submission_id))
+        track_title = f"{sub.artist} — {sub.title}" if sub else (getattr(t, "name", "—") if t else "—")
+        _notify_submission_tg(sub, f"🎉 Твой трек победил в премии «{award.title}»\n🏅 Поздравляем!\n🎵 {track_title}")
+    except Exception:
+        pass
 
     if request.headers.get("Turbo-Frame") == "award-panel":
         return redirect(url_for("awards_panel", award_id=award.id))
