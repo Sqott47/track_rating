@@ -2871,7 +2871,7 @@ def award_nominate(award_id: int, track_id: int):
         if getattr(track, "submission_id", None):
             sub = db.session.get(TrackSubmission, int(track.submission_id))
         track_title = f"{sub.artist} — {sub.title}" if sub else (getattr(track, "name", "—") or "—")
-        _notify_submission_tg(sub, f"🏆 Твой трек {track_title} номинирован в премии «{award.title}»\n🎵")
+        _notify_submission_tg(sub, f"🏆 Твой трек «{track_title}» номинирован в премии «{award.title}»\n🎵")
     except Exception:
         pass
 
@@ -2948,7 +2948,7 @@ def award_set_winner(award_id: int, nom_id: int):
         if t and getattr(t, "submission_id", None):
             sub = db.session.get(TrackSubmission, int(t.submission_id))
         track_title = f"{sub.artist} — {sub.title}" if sub else (t.name if t else "—")
-        _notify_submission_tg(sub, f"🎉 Твой трек {track_title} победил в премии «{award.title}»\n 🏅")
+        _notify_submission_tg(sub, f"🎉 Твой трек «{track_title}» победил в премии «{award.title}»\n 🏅")
     except Exception:
         pass
 
