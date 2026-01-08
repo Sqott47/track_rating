@@ -41,7 +41,7 @@
                                             sort_by='viewers',
                                             direction=('asc' if sort_by == 'viewers' and direction == 'desc' else 'desc')) }}"
                            class="top-sort-header-link">
-                            <span>Средний балл пользователей</span>
+                            <span>Средний балл зрителей</span>
                             {% if sort_by == 'viewers' %}
                                 <span class="top-sort-arrow">
                                     {% if direction == 'asc' %}▲{% else %}▼{% endif %}
@@ -103,7 +103,7 @@
                                 {% endif %}
                             </span>
                         </td>
-                        <td data-label="Средний балл пользователей">
+                        <td data-label="Средний балл зрителей">
                             <span class="top-score-chip top-score-chip-viewer score-chip">
                                 {% if t.avg_viewers is not none %}
                                     {{ "%.2f"|format(t.avg_viewers) }}
@@ -162,7 +162,7 @@
                     </table>
                 </div>
                 <div class="modal-col">
-                    <h3 class="modal-section-title">Средний балл пользователей</h3>
+                    <h3 class="modal-section-title">Средний балл зрителей</h3>
                     <table class="stats-table" style="display:none;">
                         <thead>
                             <tr>
