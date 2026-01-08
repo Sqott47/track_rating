@@ -499,7 +499,7 @@ body {
 }
 
 .brand-subtitle::after {
-    content: " · треки страдают, зрители судят";
+    content: " - в чем антигаз, брат? - в демках";
     display: block;
     font-size: 11px;
     color: var(--text-soft);
