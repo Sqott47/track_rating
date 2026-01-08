@@ -5629,6 +5629,21 @@ img, video, canvas{
 
 /* Awards list actions: keep buttons inside the card */
 .award-item{ align-items:center; }
+
+/* Award status badge (shown in panel header) */
+.award-status-badge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin-top:8px;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:800;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.14);
+  opacity: 0.95;
+}
 .award-item-actions{
   position:absolute;
   right:10px;
@@ -5646,6 +5661,36 @@ img, video, canvas{
   padding:0;
   border-radius:999px;
   font-size:14px;
+}
+
+/* Ended awards collapsible list */
+.awards-ended{
+  margin-top: 12px;
+}
+.awards-ended-summary{
+  cursor: pointer;
+  user-select: none;
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  opacity: 0.9;
+}
+.awards-ended[open] .awards-ended-summary{
+  opacity: 1;
+}
+.awards-ended-summary::-webkit-details-marker{ display:none; }
+.awards-ended-summary::after{
+  content: "▾";
+  float: right;
+  opacity: 0.75;
+  transform: translateY(1px);
+}
+.awards-ended[open] .awards-ended-summary::after{ content: "▴"; }
+.awards-ended-list{
+  margin-top: 8px;
+  max-height: 260px; /* ~5 items */
+  overflow-y: auto;
+  padding-right: 6px;
 }
 .rt-tooltip-portal.is-below::after{
   top:auto;

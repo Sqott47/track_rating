@@ -2570,7 +2570,19 @@ def _award_winner_display(award: Award):
 def awards_page():
     user = get_current_user()
     # Show all awards; draft/active/ended are visible to all.
-    awards = db.session.query(Award).order_by(Award.created_at.desc()).all()
+    # Split into active (non-ended) and ended for cleaner UI.
+    active_awards = (
+        db.session.query(Award)
+        .filter(Award.status != "ended")
+        .order_by(Award.created_at.desc())
+        .all()
+    )
+    ended_awards = (
+        db.session.query(Award)
+        .filter(Award.status == "ended")
+        .order_by(Award.created_at.desc())
+        .all()
+    )
 
     # Preselect by query arg or fallback to newest non-draft.
     selected = None
@@ -2581,19 +2593,28 @@ def awards_page():
         except Exception:
             selected = None
     if not selected:
+        # Prefer an active award by default, fall back to any non-draft.
         try:
             selected = (
                 db.session.query(Award)
-                .filter(Award.status != "draft")
+                .filter(Award.status == "active")
                 .order_by(Award.created_at.desc())
                 .first()
             )
+            if not selected:
+                selected = (
+                    db.session.query(Award)
+                    .filter(Award.status != "draft")
+                    .order_by(Award.created_at.desc())
+                    .first()
+                )
         except Exception:
             selected = None
 
     return render_template(
         "awards.html",
-        awards=awards,
+        active_awards=active_awards,
+        ended_awards=ended_awards,
         selected_award=selected,
         is_admin=bool(user and user.is_admin()),
     )
@@ -2666,6 +2687,11 @@ def awards_update(award_id: int):
         flash("Премия не найдена", "error")
         return redirect(url_for("awards_page"))
 
+    # Once ended, an award becomes immutable (no edits, no nominee changes).
+    if (award.status or "") == "ended":
+        flash("Премия завершена — редактирование запрещено", "error")
+        return redirect(url_for("awards_page", award_id=award.id))
+
     title = (request.form.get("title") or "").strip()
     if not title:
         flash("Название премии обязательно", "error")
@@ -2703,6 +2729,15 @@ def awards_delete(award_id: int):
     award = db.session.get(Award, award_id)
     if not award:
         return redirect(url_for("awards_page"))
+
+    if (award.status or "") == "ended":
+        flash("Премия завершена — удаление запрещено", "error")
+        return redirect(url_for("awards_page", award_id=award.id))
+
+    if (award.status or "") == "ended":
+        flash("Премия завершена — удаление запрещено", "error")
+        return redirect(url_for("awards_page", award_id=award.id))
+
 
     # Break FK cycle first
     award.winner_nomination_id = None
@@ -2783,6 +2818,10 @@ def award_nominate(award_id: int, track_id: int):
         flash("Не удалось номинировать трек", "error")
         return redirect(request.referrer or url_for("top_tracks"))
 
+    if (award.status or "") != "active":
+        flash("Премия завершена — номинирование закрыто", "error")
+        return redirect(request.referrer or url_for("awards_page", award_id=award.id))
+
     existing = (
         db.session.query(AwardNomination)
         .filter_by(award_id=award_id, track_id=track_id)
@@ -2814,6 +2853,9 @@ def award_remove_nomination(nom_id: int):
         return redirect(request.referrer or url_for("awards_page"))
 
     award = db.session.get(Award, nom.award_id)
+    if award and (award.status or "") != "active":
+        flash("Премия завершена — менять номинантов нельзя", "error")
+        return redirect(request.referrer or url_for("awards_page", award_id=award.id))
     # If this nomination is currently set as winner, unset it.
     if award and award.winner_nomination_id == nom.id:
         award.winner_nomination_id = None
@@ -2840,6 +2882,10 @@ def award_set_winner(award_id: int, nom_id: int):
     if not award or not nom or nom.award_id != award_id:
         flash("Не удалось назначить победителя", "error")
         return redirect(request.referrer or url_for("awards_page"))
+
+    if (award.status or "") != "active":
+        flash("Премия завершена — смена победителя запрещена", "error")
+        return redirect(request.referrer or url_for("awards_page", award_id=award.id))
 
     # Build snapshot
     t = nom.track
@@ -2871,6 +2917,12 @@ def award_unset_winner(award_id: int):
     award = db.session.get(Award, award_id)
     if not award:
         return redirect(request.referrer or url_for("awards_page"))
+
+    if (award.status or "") != "active":
+        flash("Премия завершена — победителя снимать нельзя", "error")
+        return redirect(request.referrer or url_for("awards_page", award_id=award.id))
+
+    # Status check above already guarantees we can modify.
     award.winner_nomination_id = None
     award.winner_snapshot_json = None
     db.session.add(award)
@@ -2879,5 +2931,37 @@ def award_unset_winner(award_id: int):
     if request.headers.get("Turbo-Frame") == "award-panel":
         return redirect(url_for("awards_panel", award_id=award_id))
     return redirect(request.referrer or url_for("awards_page"))
+
+
+@app.route("/awards/<int:award_id>/end", methods=["POST"])
+def award_end(award_id: int):
+    """Freeze award: no more nominations and winner changes."""
+    user = get_current_user()
+    if not (user and user.is_admin()):
+        flash("Доступ запрещён", "error")
+        return redirect(request.referrer or url_for("awards_page"))
+
+    award = db.session.get(Award, award_id)
+    if not award:
+        flash("Премия не найдена", "error")
+        return redirect(request.referrer or url_for("awards_page"))
+
+    if (award.status or "") == "ended":
+        flash("Премия уже завершена", "info")
+        return redirect(request.referrer or url_for("awards_page", award_id=award.id))
+
+    # Optional: require winner before ending (product-safe default)
+    if not award.winner_nomination_id and not award.winner_snapshot_json:
+        flash("Сначала выберите победителя", "error")
+        return redirect(request.referrer or url_for("awards_page", award_id=award.id))
+
+    award.status = "ended"
+    db.session.add(award)
+    db.session.commit()
+
+    flash("Премия завершена", "success")
+    if request.headers.get("Turbo-Frame") == "award-panel":
+        return redirect(url_for("awards_panel", award_id=award.id))
+    return redirect(request.referrer or url_for("awards_page", award_id=award.id))
 
 

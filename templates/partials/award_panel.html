@@ -8,6 +8,9 @@
         {% endif %}
         {{ award.title }}
       </div>
+      {% if award.status == 'ended' %}
+        <div class="award-status-badge">Завершена 🔒</div>
+      {% endif %}
       {% if award.description %}
         <div class="field-hint">{{ award.description }}</div>
       {% endif %}
@@ -23,7 +26,7 @@
           <div class="award-nominee-head">
             <a class="award-nominee-title" href="{{ url_for('track_page', track_id=t.id) }}" data-turbo-frame="_top">{{ t.name }}</a>
             <div class="award-nominee-actions">
-              {% if is_admin %}
+              {% if is_admin and award.status == 'active' %}
                 <form method="post" action="{{ url_for('award_set_winner', award_id=award.id, nom_id=nom.id) }}">
                   <button type="submit" class="btn-primary btn-mini">Победил</button>
                 </form>
@@ -72,10 +75,15 @@
         <div class="field-hint">Назначено: {{ winner.winner_at[:19].replace('T',' ') }}</div>
       {% endif %}
 
-      {% if is_admin %}
-        <form method="post" action="{{ url_for('award_unset_winner', award_id=award.id) }}" style="margin-top:12px;">
-          <button type="submit" class="btn-ghost">Снять победителя</button>
-        </form>
+      {% if is_admin and award.status == 'active' %}
+        <div style="display:flex; gap:10px; margin-top:12px;">
+          <form method="post" action="{{ url_for('award_unset_winner', award_id=award.id) }}">
+            <button type="submit" class="btn-ghost">Снять победителя</button>
+          </form>
+          <form method="post" action="{{ url_for('award_end', award_id=award.id) }}" onsubmit="return confirm('Завершить премию? После завершения нельзя номинировать и менять победителя.');">
+            <button type="submit" class="btn-danger">Завершить</button>
+          </form>
+        </div>
       {% endif %}
     </div>
   {% else %}

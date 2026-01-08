@@ -48,8 +48,8 @@
       {% endif %}
 
       <div class="awards-list" id="awards-list">
-        {% if awards %}
-          {% for a in awards %}
+        {% if active_awards %}
+          {% for a in active_awards %}
             <div class="award-item {% if selected_award and selected_award.id == a.id %}is-active{% endif %}" data-award-item>
               <a class="award-link"
                  href="{{ url_for('awards_panel', award_id=a.id) }}"
@@ -87,7 +87,45 @@
             </div>
           {% endfor %}
         {% else %}
-          <div class="field-hint">Пока премий нет.</div>
+          <div class="field-hint">Пока активных премий нет.</div>
+        {% endif %}
+
+        {% if ended_awards %}
+          <details class="awards-ended" {% if selected_award and selected_award.status == 'ended' %}open{% endif %}>
+            <summary class="awards-ended-summary">
+              Завершённые <span class="muted">({{ ended_awards|length }})</span>
+            </summary>
+            <div class="awards-ended-list">
+              {% for a in ended_awards %}
+                <div class="award-item {% if selected_award and selected_award.id == a.id %}is-active{% endif %}" data-award-item>
+                  <a class="award-link"
+                     href="{{ url_for('awards_panel', award_id=a.id) }}"
+                     data-award-link
+                     data-award-id="{{ a.id }}"
+                     data-award-title="{{ a.title|e }}"
+                     data-award-description="{{ (a.description or '')|e }}"
+                     data-award-emoji="{{ (a.icon_emoji or '')|e }}"
+                     data-award-image="{{ (a.image_path or '')|e }}"
+                     data-turbo-frame="award-panel">
+                    <div class="award-link-main">
+                      {% if a.image_path %}
+                        <img class="award-thumb" src="{{ a.image_path }}" alt="" onerror="this.style.display='none';">
+                      {% endif %}
+                      <div class="award-link-text">
+                        <div class="award-link-title">{{ a.title }}</div>
+                        {% if a.description %}
+                          <div class="award-link-desc">{{ a.description }}</div>
+                        {% endif %}
+                      </div>
+                    </div>
+                    <div class="award-link-meta">
+                      <span class="award-count">{{ a.nominations.count() }}</span>
+                    </div>
+                  </a>
+                </div>
+              {% endfor %}
+            </div>
+          </details>
         {% endif %}
       </div>
     </aside>
