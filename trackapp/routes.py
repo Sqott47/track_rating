@@ -43,18 +43,18 @@ import requests
 from .mailer import generate_token, sha256_hex, resend_send_email
 import json
 
-# Telegram notifications (best-effort).
-# Track submissions created via the Telegram bot store the sender in track_submissions.tg_user_id.
-# We use it to notify the author about award nominations and wins. This MUST NOT raise.
-TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "").strip()
+
+# Telegram notifications (best-effort). Uses TrackSubmission.tg_user_id.
+_TG_BOT_TOKEN = (os.getenv("TRACKRATER_TG_BOT_TOKEN") or os.getenv("TG_BOT_TOKEN") or "").strip()
+_TG_NOTIFY_DEBUG = (os.getenv("TG_NOTIFY_DEBUG") or "").strip() == "1"
 
 
 def _notify_submission_tg(sub: TrackSubmission | None, text: str) -> None:
-    if not TG_BOT_TOKEN or not sub or not sub.tg_user_id:
+    if not _TG_BOT_TOKEN or not sub or not sub.tg_user_id:
         return
     try:
         requests.post(
-            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+            f"https://api.telegram.org/bot{_TG_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": int(sub.tg_user_id),
                 "text": text,
@@ -63,7 +63,11 @@ def _notify_submission_tg(sub: TrackSubmission | None, text: str) -> None:
             timeout=7,
         )
     except Exception:
-        pass
+        if _TG_NOTIFY_DEBUG:
+            try:
+                app.logger.exception("Telegram notify failed")
+            except Exception:
+                pass
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -2867,10 +2871,9 @@ def award_nominate(award_id: int, track_id: int):
         if getattr(track, "submission_id", None):
             sub = db.session.get(TrackSubmission, int(track.submission_id))
         track_title = f"{sub.artist} — {sub.title}" if sub else (getattr(track, "name", "—") or "—")
-        _notify_submission_tg(sub, f"🏆 Твой трек номинирован в премии «{award.title}»\n🎵 {track_title}")
+        _notify_submission_tg(sub, f"🏆 Твой трек {track_title} номинирован в премии «{award.title}»\n🎵")
     except Exception:
         pass
-
 
     # If nomination happens from the awards page, keep user there.
     if request.headers.get("Turbo-Frame") == "award-panel":
@@ -2900,17 +2903,6 @@ def award_remove_nomination(nom_id: int):
 
     db.session.delete(nom)
     db.session.commit()
-
-    # Best-effort Telegram notify to the author who submitted the track via TG bot.
-    try:
-        t = nom.track
-        sub = None
-        if t and getattr(t, "submission_id", None):
-            sub = db.session.get(TrackSubmission, int(t.submission_id))
-        track_title = f"{sub.artist} — {sub.title}" if sub else (getattr(t, "name", "—") if t else "—")
-        _notify_submission_tg(sub, f"🎉 Твой трек победил в премии «{award.title}»\n🏅 Поздравляем!\n🎵 {track_title}")
-    except Exception:
-        pass
 
     if request.headers.get("Turbo-Frame") == "award-panel":
         return redirect(url_for("awards_panel", award_id=award.id))
@@ -2948,6 +2940,18 @@ def award_set_winner(award_id: int, nom_id: int):
     award.winner_snapshot_json = json.dumps(snap, ensure_ascii=False)
     db.session.add(award)
     db.session.commit()
+
+
+    # Best-effort Telegram notify to the author who submitted the track via TG bot.
+    try:
+        sub = None
+        if t and getattr(t, "submission_id", None):
+            sub = db.session.get(TrackSubmission, int(t.submission_id))
+        track_title = f"{sub.artist} — {sub.title}" if sub else (t.name if t else "—")
+        _notify_submission_tg(sub, f"🎉 Твой трек {track_title} победил в премии «{award.title}»\n 🏅")
+    except Exception:
+        pass
+
 
     if request.headers.get("Turbo-Frame") == "award-panel":
         return redirect(url_for("awards_panel", award_id=award_id))
