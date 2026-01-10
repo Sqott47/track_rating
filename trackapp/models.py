@@ -65,6 +65,7 @@ class TrackSubmission(db.Model):
         db.String(32),
         nullable=False,
         default="converting",  # converting|queued|playing|done|deleted|failed
+        index=True,  # Frequently filtered by status
     )
     file_uuid = db.Column(db.String(32), nullable=False, unique=True, index=True)
     original_filename = db.Column(db.String(255), nullable=True)
@@ -93,7 +94,7 @@ class Track(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    is_deleted = db.Column(db.Boolean, nullable=False, default=False)
+    is_deleted = db.Column(db.Boolean, nullable=False, default=False, index=True)  # Frequently filtered
     # Если трек пришёл из очереди (загрузка зрителем) — ссылка на submission.
     submission_id = db.Column(db.Integer, db.ForeignKey("track_submissions.id"), nullable=True)
 
@@ -101,7 +102,7 @@ class Track(db.Model):
 class Evaluation(db.Model):
     __tablename__ = "evaluations"
     id = db.Column(db.Integer, primary_key=True)
-    track_id = db.Column(db.Integer, db.ForeignKey("tracks.id"), nullable=False)
+    track_id = db.Column(db.Integer, db.ForeignKey("tracks.id"), nullable=False, index=True)  # FK index
     rater_name = db.Column(db.String(255), nullable=False)
     criterion_key = db.Column(db.String(50), nullable=False)
     score = db.Column(db.Float, nullable=False)
@@ -305,7 +306,7 @@ class Award(db.Model):
     icon_emoji = db.Column(db.String(16), nullable=True)
     # Optional image displayed in awards list / nomination list
     image_path = db.Column(db.Text, nullable=True)
-    status = db.Column(db.String(16), nullable=False, default="active")  # draft|active|ended
+    status = db.Column(db.String(16), nullable=False, default="active", index=True)  # draft|active|ended - frequently filtered
     created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
@@ -441,6 +442,18 @@ def _run_sqlite_migrations():
         db.session.commit()
     except Exception:
         pass
+
+    # Performance indexes for frequently filtered columns (SQLite)
+    # These are safe to run multiple times (IF NOT EXISTS)
+    try:
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_track_submissions_status ON track_submissions(status)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_tracks_is_deleted ON tracks(is_deleted)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_evaluations_track_id ON evaluations(track_id)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_awards_status ON awards(status)"))
+        db.session.commit()
+    except Exception as e:
+        print("Warning: could not create performance indexes:", e)
+
 
 
 

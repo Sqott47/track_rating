@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Загрузить трек · ANTIGAZ{% endblock %}
+
+{% block content %}
+<div class="home-shell">
+    <div class="home-block">
+        <div class="home-section-header">
+            <h2 class="home-section-title">Загрузить трек в очередь</h2>
+            <p class="home-section-subtitle">
+                Только для главного админа. Загрузите аудиофайл для тестирования.
+            </p>
+        </div>
+
+        <form method="post" enctype="multipart/form-data" class="admin-news-form">
+            <label class="auth-field">
+                <span>Исполнитель</span>
+                <input type="text" name="artist" maxlength="255" placeholder="Например: The Beatles">
+            </label>
+
+            <label class="auth-field">
+                <span>Название трека</span>
+                <input type="text" name="title" maxlength="255" placeholder="Например: Yesterday">
+            </label>
+
+            <label class="auth-field">
+                <span>Приоритет</span>
+                <select name="priority">
+                    <option value="0" selected>0 — Бесплатный</option>
+                    <option value="100">100 — Обычный</option>
+                    <option value="200">200 — Средний</option>
+                    <option value="300">300 — Высокий</option>
+                    <option value="400">400 — VIP</option>
+                </select>
+            </label>
+
+            <label class="auth-field">
+                <span>Аудиофайл (mp3, wav, flac, ogg, m4a)</span>
+                <input type="file" name="file" accept=".mp3,.wav,.flac,.ogg,.m4a,.aif,.aiff" required>
+            </label>
+
+            <div class="admin-actions" style="margin-top: 14px; gap: 10px;">
+                <button type="submit" class="btn-primary">Загрузить в очередь</button>
+                <a class="btn-ghost" href="{{ url_for('index') }}">Назад в панель</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

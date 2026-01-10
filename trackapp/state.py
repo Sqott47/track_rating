@@ -48,6 +48,36 @@ shared_state = {
 }
 
 
+def _restore_playing_tracks_on_startup():
+    """Restore tracks with status='playing' back to queue on server restart.
+    
+    When server restarts, shared_state is empty but tracks may have status='playing'
+    from previous session. These tracks are effectively "lost" - not in queue, 
+    not in player. This function resets them back to 'queued' so they reappear.
+    """
+    try:
+        playing_tracks = (
+            db.session.query(TrackSubmission)
+            .filter(TrackSubmission.status == "playing")
+            .all()
+        )
+        for sub in playing_tracks:
+            sub.status = "queued"
+            print(f"[Startup Recovery] Restored track {sub.id} ({sub.artist} — {sub.title}) to queue")
+        if playing_tracks:
+            db.session.commit()
+            print(f"[Startup Recovery] Restored {len(playing_tracks)} playing track(s) to queue")
+    except Exception as e:
+        print(f"[Startup Recovery] Warning: could not restore playing tracks: {e}")
+
+
+# Run recovery on module import (server startup)
+try:
+    from .extensions import app
+    with app.app_context():
+        _restore_playing_tracks_on_startup()
+except Exception as e:
+    print(f"[Startup Recovery] Could not run on import: {e}")
 
 
 

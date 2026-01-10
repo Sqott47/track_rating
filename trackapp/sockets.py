@@ -344,9 +344,11 @@ def handle_admin_delete_submission(data):
         return
 
     # если удаляем активный трек — остановим плеер и очистим состояние
+    is_active_track = False
     try:
         with state_lock:
             if shared_state.get("active_submission_id") == sid:
+                is_active_track = True
                 shared_state["active_submission_id"] = None
                 shared_state["playback"] = {
                     "is_playing": False,
@@ -354,7 +356,9 @@ def handle_admin_delete_submission(data):
                     "server_ts_ms": _now_ms(),
                 }
                 shared_state["track_name"] = ""
-        emit("track_name_changed", {"track_name": ""})
+        # Only reset track name if we deleted the ACTIVE track
+        if is_active_track:
+            emit("track_name_changed", {"track_name": ""})
     except Exception:
         pass
 
