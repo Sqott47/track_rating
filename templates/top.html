@@ -16,123 +16,115 @@
     <section class="top-list-section">
         <div class="top-table-card">
             <div class="top-table-wrapper">
-            <table class="top-table">
-                <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Трек</th>
-                    <th class="{% if sort_by == 'streamers' %}top-col-active{% endif %}">
-                        <a href="{{ url_for('top_tracks',
+                <table class="top-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Трек</th>
+                            <th class="{% if sort_by == 'streamers' %}top-col-active{% endif %}">
+                                <a href="{{ url_for('top_tracks',
                                             page=page,
                                             sort_by='streamers',
                                             direction=('asc' if sort_by == 'streamers' and direction == 'desc' else 'desc')) }}"
-                           class="top-sort-header-link">
-                            <span>Средний балл</span>
-                            {% if sort_by == 'streamers' %}
-                                <span class="top-sort-arrow">
-                                    {% if direction == 'asc' %}▲{% else %}▼{% endif %}
-                                </span>
-                            {% endif %}
-                        </a>
-                    </th>
-                    <th class="{% if sort_by == 'viewers' %}top-col-active{% endif %}">
-                        <a href="{{ url_for('top_tracks',
+                                    class="top-sort-header-link">
+                                    <span>Средний балл</span>
+                                    {% if sort_by == 'streamers' %}
+                                    <span class="top-sort-arrow">
+                                        {% if direction == 'asc' %}▲{% else %}▼{% endif %}
+                                    </span>
+                                    {% endif %}
+                                </a>
+                            </th>
+                            <th class="{% if sort_by == 'viewers' %}top-col-active{% endif %}">
+                                <a href="{{ url_for('top_tracks',
                                             page=page,
                                             sort_by='viewers',
                                             direction=('asc' if sort_by == 'viewers' and direction == 'desc' else 'desc')) }}"
-                           class="top-sort-header-link">
-                            <span>Средний балл зрителей</span>
-                            {% if sort_by == 'viewers' %}
-                                <span class="top-sort-arrow">
-                                    {% if direction == 'asc' %}▲{% else %}▼{% endif %}
-                                </span>
-                            {% endif %}
-                        </a>
-                    </th>
-                </tr>
-                </thead>
-                <tbody id="top-table-body">
-                {% for t in tracks %}
-                    <tr class="top-row" data-track-id="{{ t.id }}">
-                        <td class="top-pos" data-label="#">{{ t.position }}</td>
-                        <td class="top-name-cell" data-label="Трек">
-                            <span class="top-name-text">{{ t.name }}</span>
-                            {% if t.award_wins and t.award_wins|length %}
+                                    class="top-sort-header-link">
+                                    <span>Средний балл зрителей</span>
+                                    {% if sort_by == 'viewers' %}
+                                    <span class="top-sort-arrow">
+                                        {% if direction == 'asc' %}▲{% else %}▼{% endif %}
+                                    </span>
+                                    {% endif %}
+                                </a>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="top-table-body">
+                        {% for t in tracks %}
+                        <tr class="top-row" data-track-id="{{ t.id }}">
+                            <td class="top-pos" data-label="#">{{ t.position }}</td>
+                            <td class="top-name-cell" data-label="Трек">
+                                <span class="top-name-text">{{ t.name }}</span>
+                                {% if t.award_wins and t.award_wins|length %}
                                 {% set b = t.award_wins[0] %}
-                                <span class="award-pill award-pill--win rt-tooltip-target"
-                                      data-rt-tooltip="win"
-                                      data-rt-award="{{ b.title|e }}"
-                                      data-rt-kind="Победитель">
+                                <span class="award-pill award-pill--win rt-tooltip-target" data-rt-tooltip="win"
+                                    data-rt-award="{{ b.title|e }}" data-rt-kind="Победитель">
                                     <span class="award-pill-emoji">{{ b.emoji }}</span>
                                 </span>
-                            {% elif t.award_noms and t.award_noms|length %}
+                                {% elif t.award_noms and t.award_noms|length %}
                                 {% set b = t.award_noms[0] %}
-                                <span class="award-pill rt-tooltip-target"
-                                      data-rt-tooltip="nom"
-                                      data-rt-award="{{ b.title|e }}"
-                                      data-rt-kind="Номинант">
+                                <span class="award-pill rt-tooltip-target" data-rt-tooltip="nom"
+                                    data-rt-award="{{ b.title|e }}" data-rt-kind="Номинант">
                                     <span class="award-pill-emoji">{{ b.emoji }}</span>
                                 </span>
-                            {% endif %}
-                            {% if is_admin %}
-                            <span class="top-row-actions">
-                                <button type="button"
-                                        class="top-action-btn top-action-rename"
-                                        title="Переименовать трек"
-                                        data-track-id="{{ t.id }}"
+                                {% endif %}
+                                {% if is_admin %}
+                                <span class="top-row-actions">
+                                    <button type="button" class="top-action-btn top-action-rename"
+                                        title="Переименовать трек" data-track-id="{{ t.id }}"
                                         data-track-name="{{ t.name }}">
-                                    ✏️
-                                </button>
-                                <button type="button"
-                                        class="top-action-btn top-action-delete"
-                                        title="Удалить трек"
-                                        data-track-id="{{ t.id }}"
-                                        data-track-name="{{ t.name }}">
-                                    🗑
-                                </button>
+                                        ✏️
+                                    </button>
+                                    <button type="button" class="top-action-btn top-action-delete" title="Удалить трек"
+                                        data-track-id="{{ t.id }}" data-track-name="{{ t.name }}">
+                                        🗑
+                                    </button>
 
-                            </span>
-                            {% endif %}
-                        </td>
-                        <td data-label="Средний балл">
-                            <span class="top-score-chip score-chip">
-                                {% if t.avg_streamers is not none %}
+                                </span>
+                                {% endif %}
+                            </td>
+                            <td data-label="Средний балл">
+                                <span class="top-score-chip score-chip">
+                                    {% if t.avg_streamers is not none %}
                                     {{ "%.2f"|format(t.avg_streamers) }}
-                                {% else %}
+                                    {% else %}
                                     ?
-                                {% endif %}
-                            </span>
-                        </td>
-                        <td data-label="Средний балл зрителей">
-                            <span class="top-score-chip top-score-chip-viewer score-chip">
-                                {% if t.avg_viewers is not none %}
+                                    {% endif %}
+                                </span>
+                            </td>
+                            <td data-label="Средний балл зрителей">
+                                <span class="top-score-chip top-score-chip-viewer score-chip">
+                                    {% if t.avg_viewers is not none %}
                                     {{ "%.2f"|format(t.avg_viewers) }}
-                                {% else %}
+                                    {% else %}
                                     ?
-                                {% endif %}
-                            </span>
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
+                                    {% endif %}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <div class="pagination-row">
             {% if page > 1 %}
-                <a class="page-link" href="{{ url_for('top_tracks', page=page-1, sort_by=sort_by, direction=direction) }}">« Назад</a>
+            <a class="page-link" href="{{ url_for('top_tracks', page=page-1, sort_by=sort_by, direction=direction) }}">«
+                Назад</a>
             {% else %}
-                <span class="page-link page-link-disabled">« Назад</span>
+            <span class="page-link page-link-disabled">« Назад</span>
             {% endif %}
 
             <span class="page-info">Страница {{ page }} из {{ total_pages }}</span>
 
-            {% if page < total_pages %}
-                <a class="page-link" href="{{ url_for('top_tracks', page=page+1, sort_by=sort_by, direction=direction) }}">Вперёд »</a>
-            {% else %}
+            {% if page < total_pages %} <a class="page-link"
+                href="{{ url_for('top_tracks', page=page+1, sort_by=sort_by, direction=direction) }}">Вперёд »</a>
+                {% else %}
                 <span class="page-link page-link-disabled">Вперёд »</span>
-            {% endif %}
+                {% endif %}
         </div>
     </section>
 </div>
@@ -199,7 +191,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <a href="#" class="btn-secondary" id="track-modal-open-page" >
+                <a href="#" class="btn-secondary" id="track-modal-open-page">
                     Перейти на страницу трека
                 </a>
             </div>

@@ -357,30 +357,9 @@
             if (!btn || !nav) return;
             if (btn.dataset.bound === "1") return;
             btn.dataset.bound = "1";
-
-            // Toggle menu on button click
-            btn.addEventListener("click", function (e) {
-                e.stopPropagation();
+            btn.addEventListener("click", function () {
                 var isOpen = nav.classList.toggle("nav-open");
                 btn.classList.toggle("nav-toggle--active", isOpen);
-            });
-
-            // Close menu when clicking outside
-            document.addEventListener("click", function (e) {
-                if (!nav.classList.contains("nav-open")) return;
-                // If click is outside nav and button, close menu
-                if (!nav.contains(e.target) && !btn.contains(e.target)) {
-                    nav.classList.remove("nav-open");
-                    btn.classList.remove("nav-toggle--active");
-                }
-            });
-
-            // Close menu when clicking on a nav link
-            nav.addEventListener("click", function (e) {
-                if (e.target.classList.contains("nav-link")) {
-                    nav.classList.remove("nav-open");
-                    btn.classList.remove("nav-toggle--active");
-                }
             });
         });
     </script>
